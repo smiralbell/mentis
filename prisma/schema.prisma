@@ -1,0 +1,109 @@
+// Prisma schema for MENTIS
+// This is for reference only. DO NOT run migrations.
+// Use the SQL scripts in /sql directory to create tables manually.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ORGANIZATION_ADMIN
+  TEACHER
+  STUDENT
+}
+
+model Organization {
+  id                 String   @id @default(uuid())
+  name               String   @db.VarChar(255)
+  approxStudentCount Int?     @map("approx_student_count")
+  adminCode          String?  @db.VarChar(100) @map("admin_code")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  users     User[]
+  classes   Class[]
+  joinCodes JoinCode[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String    @id @default(uuid())
+  email          String?   @unique @db.VarChar(255)
+  passwordHash   String?   @db.VarChar(255)
+  name           String    @db.VarChar(255)
+  role           UserRole
+  organizationId String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  enrollments    Enrollment[]
+  createdClasses Class[]      @relation("ClassCreator")
+  createdJoinCodes JoinCode[]
+
+  @@index([email])
+  @@index([organizationId])
+  @@map("users")
+}
+
+model Class {
+  id             String   @id @default(uuid())
+  name          String   @db.VarChar(255)
+  organizationId String
+  createdById   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  creator       User         @relation("ClassCreator", fields: [createdById], references: [id])
+  enrollments   Enrollment[]
+  joinCodes     JoinCode[]
+
+  @@index([organizationId])
+  @@map("classes")
+}
+
+model Enrollment {
+  id        String   @id @default(uuid())
+  userId    String
+  classId   String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, classId])
+  @@index([userId])
+  @@index([classId])
+  @@map("enrollments")
+}
+
+model JoinCode {
+  id             String    @id @default(uuid())
+  code           String    @unique @db.VarChar(50)
+  classId        String
+  organizationId String
+  createdById    String
+  expiresAt      DateTime?
+  maxUses        Int?      // null = unlimited uses
+  currentUses    Int       @default(0)
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  class          Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
+  creator        User         @relation(fields: [createdById], references: [id])
+
+  @@index([code])
+  @@index([organizationId])
+  @@index([classId])
+  @@map("join_codes")
+}
+
