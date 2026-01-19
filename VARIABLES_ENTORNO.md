@@ -127,3 +127,4 @@ Si hay errores, revisa que:
 - ✅ `NEXTAUTH_URL` coincida con la URL donde corre la app
 
 
+
