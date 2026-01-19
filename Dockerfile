@@ -14,6 +14,9 @@ RUN npm ci
 # Copy source
 COPY . .
 
+# Generate Prisma Client (required for @prisma/client)
+RUN npx prisma generate
+
 # Build Next.js app (standalone output is enabled in next.config.js)
 RUN npm run build
 
