@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashPassword, generateJoinCode } from '@/lib/auth'
 import { registerSchoolSchema } from '@/lib/validations'
+import { Prisma } from '@prisma/client'
 
 /**
  * Register School API
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
     const passwordHash = await hashPassword(validatedData.password)
 
     // Create organization, default class, and admin user in a transaction
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // 1) Create organization
       const organization = await tx.organization.create({
         data: {
