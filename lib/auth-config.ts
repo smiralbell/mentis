@@ -2,7 +2,6 @@ import { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import { prisma } from '@/lib/prisma'
 import { verifyPassword } from '@/lib/auth'
-import { UserRole } from '@prisma/client'
 
 /**
  * NextAuth Configuration
@@ -74,7 +73,7 @@ export const authOptions: NextAuthOptions = {
           include: { organization: true },
         })
 
-        if (!user || user.role !== UserRole.STUDENT) {
+        if (!user || user.role !== 'STUDENT') {
           throw new Error('Invalid student account')
         }
 
@@ -103,7 +102,7 @@ export const authOptions: NextAuthOptions = {
       // Add custom properties to session
       if (session.user) {
         session.user.id = token.id as string
-        session.user.role = token.role as UserRole
+        session.user.role = token.role as any
         session.user.organizationId = token.organizationId as string
       }
       return session

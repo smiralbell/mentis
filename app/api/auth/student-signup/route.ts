@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashPassword } from '@/lib/auth'
 import { studentSignupSchema } from '@/lib/validations'
-import { UserRole } from '@prisma/client'
 
 /**
  * Student Signup API
@@ -54,7 +53,7 @@ export async function POST(request: NextRequest) {
         email: validatedData.email,
         passwordHash,
         name: validatedData.name,
-        role: UserRole.STUDENT,
+        role: 'STUDENT',
         organizationId: organization.id,
       },
     })

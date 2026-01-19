@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashPassword, generateJoinCode } from '@/lib/auth'
 import { registerSchoolSchema } from '@/lib/validations'
-import { UserRole } from '@prisma/client'
 
 /**
  * Register School API
@@ -59,7 +58,7 @@ export async function POST(request: NextRequest) {
           email: validatedData.email,
           passwordHash,
           name: validatedData.email.split('@')[0], // Default name from email
-          role: UserRole.ORGANIZATION_ADMIN,
+          role: 'ORGANIZATION_ADMIN',
           organizationId: organization.id,
         },
       })

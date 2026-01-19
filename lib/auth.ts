@@ -1,6 +1,5 @@
 import { compare, hash } from 'bcryptjs'
 import { prisma } from './prisma'
-import { UserRole } from '@prisma/client'
 
 /**
  * Hash a password using bcrypt
