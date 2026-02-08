@@ -46,10 +46,9 @@ export default function StudentAccessPage() {
         return
       }
 
-      // Create a session for the student using standard credentials login
-      const signInResponse = await signIn('credentials', {
-        email: formData.email,
-        password: formData.password,
+      // Log in with the student provider so the session has role STUDENT (not credentials/admin)
+      const signInResponse = await signIn('student', {
+        userId: data.userId,
         redirect: false,
       })
 

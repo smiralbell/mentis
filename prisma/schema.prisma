@@ -42,14 +42,31 @@ model User {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  enrollments    Enrollment[]
-  createdClasses Class[]      @relation("ClassCreator")
+  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  enrollments       Enrollment[]
+  createdClasses   Class[]          @relation("ClassCreator")
   createdJoinCodes JoinCode[]
+  learningSummaries LearningSummary[]
+  studentProgress  StudentProgress?
 
   @@index([email])
   @@index([organizationId])
   @@map("users")
+}
+
+model StudentProgress {
+  id          String    @id @default(uuid())
+  userId      String    @unique @map("user_id")
+  prPoints    Int       @default(0) @map("pr_points")
+  lastChatAt  DateTime? @map("last_chat_at")
+  streak      Int       @default(0)
+  hintsUsed   Int       @default(0) @map("hints_used")
+  createdAt   DateTime  @default(now()) @map("createdAt")
+  updatedAt   DateTime  @updatedAt @map("updatedAt")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("student_progress")
 }
 
 model Class {
@@ -105,5 +122,20 @@ model JoinCode {
   @@index([organizationId])
   @@index([classId])
   @@map("join_codes")
+}
+
+model LearningSummary {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  content    String   @db.Text
+  sourceType String?  @default("chat") @map("source_type") @db.VarChar(50)
+  sourceId   String?  @map("source_id") @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("createdAt")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("learning_summaries")
 }
 
