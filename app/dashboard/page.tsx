@@ -2,13 +2,26 @@
 
 import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 
 type ThemeCard = {
   id: string
   name: string
   icon: string
+}
+
+type Subject = {
+  id: string
+  name: string
+  subtitle: string
+  icon?: string
+}
+
+type ChatSession = {
+  id: string
+  title: string
+  updatedAt: string
 }
 
 /**
@@ -103,131 +116,629 @@ function StudentDashboard({ studentName }: { studentName: string }) {
 
   const [showNewTheme, setShowNewTheme] = useState(false)
   const [newThemeName, setNewThemeName] = useState('')
-  const [newThemeIcon, setNewThemeIcon] = useState('UV')
   const [view, setView] = useState<'missions' | 'teachers'>('missions')
+  const [selectedTheme, setSelectedTheme] = useState<ThemeCard | null>(null)
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>('language')
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null)
+  const [sidebarMode, setSidebarMode] = useState<'subjects' | 'chats'>('subjects')
+  const [chatPrompt, setChatPrompt] = useState<string>('')
+  const [chatMessages, setChatMessages] = useState<
+    Record<string, { role: 'user' | 'assistant'; content: string }[]>
+  >({})
+  const [isSending, setIsSending] = useState(false)
+
+  const [chatSessions, setChatSessions] = useState<Record<string, ChatSession[]>>({
+    language: [],
+    maths: [],
+    world: [],
+    english: [],
+    arts: [],
+  })
+
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null)
+
+  const currentMessages =
+    selectedChatId && chatMessages[selectedChatId]
+      ? chatMessages[selectedChatId]
+      : []
+
+  useEffect(() => {
+    if (messagesContainerRef.current && currentMessages.length > 0) {
+      const container = messagesContainerRef.current
+      // Usar requestAnimationFrame para asegurar que el DOM se haya actualizado
+      requestAnimationFrame(() => {
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: 'smooth',
+        })
+      })
+    }
+  }, [currentMessages])
+
+  const subjects: Subject[] = [
+    { id: 'language', name: 'LANGUAGE', subtitle: 'READING' },
+    { id: 'maths', name: 'MATHS', subtitle: 'NUMBERS' },
+    { id: 'world', name: 'WORLD', subtitle: 'SCIENCE' },
+    { id: 'english', name: 'ENGLISH', subtitle: 'COMMUNICATION & VOCAB' },
+    { id: 'arts', name: 'ARTS', subtitle: 'CREATIVITY & OBSERVATION' },
+  ]
 
   const handleCreateTheme = (e: React.FormEvent) => {
     e.preventDefault()
     if (!newThemeName.trim()) return
+
+    // Derivar unas buenas iniciales automáticamente a partir del nombre
+    const words = newThemeName
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+
+    let initials = ''
+
+    if (words.length === 1) {
+      // Un solo término: tomar las 2–3 primeras letras
+      initials = words[0].slice(0, 3)
+    } else {
+      // Varios términos: tomar la primera letra de cada palabra hasta 3
+      initials = words
+        .map((w) => w[0])
+        .join('')
+        .slice(0, 3)
+    }
+
+    if (!initials) {
+      initials = 'UV'
+    }
 
     setThemes((prev) => [
       ...prev,
       {
         id: `${Date.now()}`,
         name: newThemeName.trim(),
-        icon: (newThemeIcon || 'UV').toUpperCase(),
+        icon: initials.toUpperCase(),
       },
     ])
 
     setNewThemeName('')
-    setNewThemeIcon('UV')
     setShowNewTheme(false)
   }
 
+  const isChatView = Boolean(selectedTheme)
+
   return (
-    <div className="min-h-screen bg-[#FFFBEA]">
+    <div
+      className="min-h-screen bg-[#FFF7E6]"
+    >
       {/* Top navigation bar */}
-      <header className="flex items-center justify-between px-8 py-5 border-b border-yellow-200 bg-white/70 backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-2xl bg-mentis-yellow flex items-center justify-center shadow-md">
-            <span className="font-bold text-mentis-navy text-lg">M</span>
-          </div>
-          <div className="leading-tight">
-            <p className="text-sm font-semibold text-mentis-navy tracking-wide">
-              MENTIS
-            </p>
-            <p className="text-[11px] uppercase tracking-[0.25em] text-mentis-navy/60">
-              LAB COGNITIF
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 text-xs">
-          <div className="flex rounded-full bg-gray-100 p-1">
-            <button
-              type="button"
-              onClick={() => setView('missions')}
-              className={`px-5 py-2 text-xs font-semibold rounded-full transition-colors ${
-                view === 'missions'
-                  ? 'bg-mentis-yellow text-mentis-navy shadow-sm'
-                  : 'text-mentis-navy/60'
-              }`}
-            >
-              Missions
-            </button>
-            <button
-              type="button"
-              onClick={() => setView('teachers')}
-              className={`px-5 py-2 text-xs font-semibold rounded-full transition-colors ${
-                view === 'teachers'
-                  ? 'bg-mentis-yellow text-mentis-navy shadow-sm'
-                  : 'text-mentis-navy/60'
-              }`}
-            >
-              Enseignants
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={() => signOut({ callbackUrl: '/' })}
-            className="rounded-full bg-transparent border border-mentis-navy/20 px-4 py-2 font-medium text-mentis-navy/80 hover:bg-mentis-navy hover:text-white transition-colors"
-          >
-            Log out
-          </button>
-        </div>
-      </header>
-
-      {/* Main content */}
-      <main className="px-6 py-10 md:px-16 md:py-12">
-        {view === 'missions' ? (
-          <>
-            <div className="text-center mb-10">
-              <p className="text-xs uppercase tracking-[0.3em] text-mentis-navy/60 mb-2">
-                Bienvenue, {studentName}
+      {!selectedTheme && (
+        <header className="flex items-center justify-between px-8 py-5 border-b border-yellow-200 bg-white/70 backdrop-blur-sm">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-2xl bg-mentis-yellow flex items-center justify-center shadow-md">
+              <span className="font-bold text-mentis-navy text-lg">M</span>
+            </div>
+            <div className="leading-tight">
+              <p className="text-sm font-semibold text-mentis-navy tracking-wide">
+                MENTIS
               </p>
-              <h1 className="text-4xl md:text-5xl font-extrabold text-mentis-navy tracking-wide mb-4">
-                TARGET ANALYSIS
-              </h1>
-              <p className="text-xs md:text-sm uppercase tracking-[0.35em] text-mentis-navy/55">
-                Inicializa tu universo de misión eligiendo una temática
+              <p className="text-[11px] uppercase tracking-[0.25em] text-mentis-navy/60">
+                LAB COGNITIF
               </p>
             </div>
+          </div>
 
-            <section className="max-w-5xl mx-auto">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                {themes.map((theme) => (
-                  <button
-                    key={theme.id}
-                    type="button"
-                    className="group rounded-[32px] bg-white shadow-md px-6 py-7 flex flex-col items-center gap-4 hover:-translate-y-1 hover:shadow-lg transition-all"
-                  >
-                    <div className="h-20 w-20 rounded-3xl bg-mentis-yellow flex items-center justify-center shadow-md text-xl font-extrabold text-mentis-navy tracking-wide uppercase">
-                      <span>{theme.icon}</span>
-                    </div>
-                    <p className="text-sm font-semibold tracking-wide text-mentis-navy uppercase">
-                      {theme.name}
-                    </p>
-                  </button>
-                ))}
+          <div className="flex items-center gap-3 text-xs">
+            <div className="flex rounded-full bg-gray-100 p-1">
+              <button
+                type="button"
+                onClick={() => setView('missions')}
+                className={`px-5 py-2 text-xs font-semibold rounded-full transition-colors ${
+                  view === 'missions'
+                    ? 'bg-mentis-yellow text-mentis-navy shadow-sm'
+                    : 'text-mentis-navy/60'
+                }`}
+              >
+                Missions
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('teachers')}
+                className={`px-5 py-2 text-xs font-semibold rounded-full transition-colors ${
+                  view === 'teachers'
+                    ? 'bg-mentis-yellow text-mentis-navy shadow-sm'
+                    : 'text-mentis-navy/60'
+                }`}
+              >
+                Enseignants
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => signOut({ callbackUrl: '/' })}
+              className="rounded-full bg-transparent border border-mentis-navy/20 px-4 py-2 font-medium text-mentis-navy/80 hover:bg-mentis-navy hover:text-white transition-colors"
+            >
+              Log out
+            </button>
+          </div>
+        </header>
+      )}
 
-                {/* New theme card */}
-                <button
-                  type="button"
-                  onClick={() => setShowNewTheme(true)}
-                  className="rounded-[32px] border-2 border-dashed border-mentis-yellow/70 bg-white/60 px-6 py-7 flex flex-col items-center justify-center gap-3 hover:bg-white hover:-translate-y-1 hover:shadow-md transition-all"
-                >
-              <div className="h-20 w-20 rounded-3xl bg-mentis-yellow/40 flex items-center justify-center text-3xl text-mentis-navy">
-                <span className="font-bold">+</span>
+      {/* Main content */}
+      <main className={isChatView ? 'h-screen w-full flex' : 'px-6 py-10 md:px-16 md:py-12'}>
+        {view === 'missions' ? (
+          <>
+            {!selectedTheme ? (
+              <>
+                <div className="text-center mb-10">
+                  <p className="text-xs uppercase tracking-[0.3em] text-mentis-navy/60 mb-2">
+                    Bienvenue, {studentName}
+                  </p>
+                  <h1 className="text-4xl md:text-5xl font-extrabold text-mentis-navy tracking-wide mb-4">
+                    TARGET ANALYSIS
+                  </h1>
+                  <p className="text-xs md:text-sm uppercase tracking-[0.35em] text-mentis-navy/55">
+                    Inicializa tu universo de misión eligiendo una temática
+                  </p>
+                </div>
+
+                <section className="max-w-5xl mx-auto">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 items-stretch">
+                    {themes.map((theme) => (
+                      <button
+                        key={theme.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedTheme(theme)
+                          setSelectedSubjectId('language')
+                          setSidebarMode('subjects')
+                        }}
+                        className="group h-full rounded-[32px] bg-white shadow-md px-6 py-7 flex flex-col items-center justify-center gap-4 hover:-translate-y-1 hover:shadow-lg transition-all text-center"
+                      >
+                        <div className="h-20 w-20 rounded-3xl bg-mentis-yellow flex items-center justify-center shadow-md text-xl font-extrabold text-mentis-navy tracking-wide uppercase">
+                          <span>{theme.icon}</span>
+                        </div>
+                        <p className="text-sm font-semibold tracking-wide text-mentis-navy uppercase">
+                          {theme.name}
+                        </p>
+                      </button>
+                    ))}
+
+                    {/* New theme card */}
+                    <button
+                      type="button"
+                      onClick={() => setShowNewTheme(true)}
+                      className="h-full rounded-[32px] border-2 border-dashed border-mentis-yellow/70 bg-white/60 px-6 py-7 flex flex-col items-center justify-center gap-3 hover:bg-white hover:-translate-y-1 hover:shadow-md transition-all text-center"
+                    >
+                      <div className="h-20 w-20 rounded-3xl bg-mentis-yellow/40 flex items-center justify-center text-3xl text-mentis-navy">
+                        <span className="font-bold">+</span>
+                      </div>
+                      <p className="text-sm font-semibold tracking-wide text-mentis-navy uppercase">
+                        Nuevo universo
+                      </p>
+                      <p className="text-[11px] text-mentis-navy/60 text-center max-w-[10rem]">
+                        Crea tu propia temática para aprender a tu manera.
+                      </p>
+                    </button>
                   </div>
-                  <p className="text-sm font-semibold tracking-wide text-mentis-navy uppercase">
-                    Nuevo universo
-                  </p>
-                  <p className="text-[11px] text-mentis-navy/60 text-center max-w-[10rem]">
-                    Crea tu propia temática para aprender a tu manera.
-                  </p>
-                </button>
-              </div>
-            </section>
+                </section>
+              </>
+            ) : (
+              <section className="flex-1 flex">
+                {/* Lateral completo (panel 1) */}
+                <div className="w-72 md:w-80 bg-[#FFEEC2] text-mentis-navy flex flex-col gap-4 px-5 py-5 border-r border-mentis-yellow/40">
+                  <aside className="flex-1 flex flex-col gap-4 overflow-hidden">
+                    <div className="flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedTheme(null)
+                          setSelectedChatId(null)
+                          setSidebarMode('subjects')
+                          setChatMessages({})
+                        }}
+                        className="flex items-center gap-2 px-3 py-2 rounded-full bg-white/70 border border-mentis-yellow/60 hover:bg-white transition-all text-xs font-semibold"
+                      >
+                        <span className="h-7 w-7 rounded-full bg-mentis-yellow flex items-center justify-center text-mentis-navy text-sm">
+                          ⌂
+                        </span>
+                        <span className="tracking-[0.16em] uppercase">
+                          Home
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const subjectId = selectedSubjectId || 'language'
+                          const newId = `${subjectId}-${Date.now()}`
+                          const subjectName =
+                            subjects.find((s) => s.id === subjectId)?.name || 'Chat'
+                          const newSession: ChatSession = {
+                            id: newId,
+                            title: `Nuevo chat · ${subjectName}`,
+                            updatedAt: 'Ahora mismo',
+                          }
+
+                          setChatSessions((prev) => ({
+                            ...prev,
+                            [subjectId]: [newSession, ...(prev[subjectId] || [])],
+                          }))
+                          setSelectedChatId(newId)
+                          setSidebarMode('chats')
+                          setChatMessages((prev) => ({ ...prev, [newId]: [] }))
+                        }}
+                        className="h-9 w-9 rounded-full bg-mentis-yellow flex items-center justify-center text-mentis-navy text-lg font-bold shadow-sm hover:bg-mentis-yellow/90 transition-colors"
+                        aria-label="Nuevo chat"
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    {sidebarMode === 'subjects' ? (
+                      <>
+                        <div className="text-[11px] uppercase tracking-[0.25em] text-mentis-navy/60 px-1">
+                          Asignaturas
+                        </div>
+
+                        {subjects.map((subject) => {
+                          const isActive = subject.id === selectedSubjectId
+                          const hasChats = (chatSessions[subject.id] || []).length > 0
+                          return (
+                            <button
+                              key={subject.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedSubjectId(subject.id)
+                                setSidebarMode(hasChats ? 'chats' : 'subjects')
+                              }}
+                              className={`w-full flex items-center gap-4 px-4 py-4 rounded-[999px] transition-all ${
+                                isActive
+                                  ? 'bg-white text-mentis-navy shadow-md border border-mentis-yellow/60'
+                                  : 'bg-[#FFF7E6] text-mentis-navy border border-transparent hover:border-mentis-yellow/60'
+                              }`}
+                            >
+                              <div
+                                className={`h-12 w-12 rounded-2xl flex items-center justify-center text-lg font-bold ${
+                                  isActive
+                                    ? 'bg-mentis-yellow text-mentis-navy'
+                                    : 'bg-mentis-yellow/30 text-mentis-navy'
+                                }`}
+                              >
+                                <span>
+                                  {subject.name
+                                    .split(' ')
+                                    .map((w) => w[0])
+                                    .join('')
+                                    .slice(0, 2)}
+                                </span>
+                              </div>
+                              <div className="flex flex-col items-start">
+                                <span
+                                  className={`text-xs font-semibold tracking-[0.18em] uppercase ${
+                                    isActive ? 'text-mentis-navy' : 'text-mentis-navy/80'
+                                  }`}
+                                >
+                                  {subject.name}
+                                </span>
+                                <span
+                                  className={`text-[10px] font-medium tracking-[0.2em] uppercase ${
+                                    isActive ? 'text-mentis-yellow/80' : 'text-white/50'
+                                  }`}
+                                >
+                                  {subject.subtitle}
+                                </span>
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 px-1 text-[11px] uppercase tracking-[0.18em]">
+                          <button
+                            type="button"
+                            onClick={() => setSidebarMode('subjects')}
+                            className="px-3 py-1 rounded-full border transition-colors text-mentis-navy/70 hover:text-mentis-navy hover:border-mentis-yellow/70"
+                          >
+                            Asignaturas
+                          </button>
+                          <span className="px-3 py-1 rounded-full bg-mentis-yellow text-mentis-navy font-semibold">
+                            Historial
+                          </span>
+                        </div>
+
+                        <div className="mt-2 space-y-2 overflow-auto pr-1">
+                          {(chatSessions[selectedSubjectId] || []).map((session) => {
+                            const isActiveChat = session.id === selectedChatId
+                            return (
+                              <button
+                                key={session.id}
+                                type="button"
+                                onClick={() => setSelectedChatId(session.id)}
+                                className={`w-full text-left px-4 py-3 rounded-2xl border text-xs transition-all ${
+                                  isActiveChat
+                                    ? 'bg-white text-mentis-navy border-mentis-yellow shadow-sm'
+                                    : 'bg-[#FFF7E6] text-mentis-navy/80 border-transparent hover:border-mentis-yellow/60'
+                                }`}
+                              >
+                                <div className="font-semibold truncate">{session.title}</div>
+                                <div className="text-[10px] text-mentis-navy/60 mt-1">
+                                  {session.updatedAt}
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </aside>
+                </div>
+
+                {/* Panel de chat (panel 2) */}
+                <section className="flex-1 flex flex-col relative">
+                  <div className="px-8 py-5 border-b border-mentis-yellow/40 flex items-center justify-center">
+                    <h3 className="text-sm md:text-base font-semibold text-mentis-navy tracking-[0.25em] uppercase">
+                      {subjects.find((s) => s.id === selectedSubjectId)?.name}
+                    </h3>
+                  </div>
+
+                  <div className="flex-1 flex flex-col py-4 gap-4 pr-0">
+                    <div
+                      ref={messagesContainerRef}
+                      className={`flex-1 max-h-[calc(100vh-260px)] overflow-y-auto pl-4 md:pl-8 pr-4 scrollbar-mentis ${
+                        currentMessages.length === 0 ? 'flex items-center justify-center' : 'space-y-3'
+                      }`}
+                    >
+                      <div className={`w-full max-w-3xl ${currentMessages.length === 0 ? 'mx-auto' : 'mx-auto'}`}>
+                        {currentMessages.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center w-full">
+                            <p className="text-2xl md:text-3xl font-semibold text-mentis-navy mb-6">
+                              ¿Qué toca hoy con Mentis?
+                            </p>
+                            <form
+                              className="w-full"
+                              onSubmit={async (e) => {
+                                e.preventDefault()
+                                if (!chatPrompt.trim() || isSending) return
+
+                                // Si no hay chat seleccionado, crear uno nuevo
+                                let chatId = selectedChatId
+                                if (!chatId) {
+                                  const subjectId = selectedSubjectId || 'language'
+                                  chatId = `${subjectId}-${Date.now()}`
+                                  const subjectName =
+                                    subjects.find((s) => s.id === subjectId)?.name || 'Chat'
+                                  const newSession: ChatSession = {
+                                    id: chatId,
+                                    title: `Nuevo chat · ${subjectName}`,
+                                    updatedAt: 'Ahora mismo',
+                                  }
+                                  setChatSessions((prev) => ({
+                                    ...prev,
+                                    [subjectId]: [newSession, ...(prev[subjectId] || [])],
+                                  }))
+                                  setSelectedChatId(chatId)
+                                  setSidebarMode('chats')
+                                }
+
+                                const userMessage = chatPrompt.trim()
+                                setChatPrompt('')
+
+                                // Añadir mensaje del usuario
+                                setChatMessages((prev) => ({
+                                  ...prev,
+                                  [chatId!]: [
+                                    ...(prev[chatId!] || []),
+                                    { role: 'user', content: userMessage },
+                                  ],
+                                }))
+
+                                try {
+                                  setIsSending(true)
+                                  const currentHistory = chatMessages[chatId!] || []
+                                  const res = await fetch('/api/student-chat', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                      subjectId: selectedSubjectId,
+                                      prompt: userMessage,
+                                      history: currentHistory,
+                                    }),
+                                  })
+
+                                  if (!res.ok) {
+                                    throw new Error('Chat request failed')
+                                  }
+
+                                  const data = await res.json()
+                                  const reply: string =
+                                    data?.reply ??
+                                    'Lo siento, ahora mismo no puedo responder.'
+
+                                  // Añadir respuesta del asistente
+                                  setChatMessages((prev) => ({
+                                    ...prev,
+                                    [chatId!]: [
+                                      ...(prev[chatId!] || []),
+                                      { role: 'assistant', content: reply },
+                                    ],
+                                  }))
+                                } catch (err) {
+                                  console.error(err)
+                                  setChatMessages((prev) => ({
+                                    ...prev,
+                                    [chatId!]: [
+                                      ...(prev[chatId!] || []),
+                                      {
+                                        role: 'assistant',
+                                        content:
+                                          'Ha ocurrido un error al contactar con el tutor. Intenta de nuevo en unos segundos.',
+                                      },
+                                    ],
+                                  }))
+                                } finally {
+                                  setIsSending(false)
+                                }
+                              }}
+                            >
+                              <div className="rounded-full bg-white border border-mentis-yellow/60 text-mentis-navy flex items-center px-6 py-3 shadow-sm">
+                                <span className="text-xl mr-3 text-mentis-navy">＋</span>
+                                <input
+                                  type="text"
+                                  value={chatPrompt}
+                                  onChange={(e) => setChatPrompt(e.target.value)}
+                                  placeholder={`Pregunta lo que quieras sobre ${subjects
+                                    .find((s) => s.id === selectedSubjectId)
+                                    ?.name.toLowerCase()}…`}
+                                  className="flex-1 bg-transparent outline-none text-sm md:text-base placeholder:text-mentis-navy/40"
+                                />
+                                <button
+                                  type="submit"
+                                  disabled={isSending}
+                                  className="ml-3 text-xs font-semibold uppercase tracking-[0.18em] text-mentis-navy/70 hover:text-mentis-navy disabled:opacity-40"
+                                >
+                                  {isSending ? 'Enviando…' : 'Enviar'}
+                                </button>
+                              </div>
+                            </form>
+                          </div>
+                        ) : (
+                          <>
+                            {currentMessages.map((m, idx) => (
+                              <div
+                                key={idx}
+                                className={`max-w-3xl text-sm md:text-base ${
+                                  m.role === 'user'
+                                    ? 'ml-auto text-right'
+                                    : 'mr-auto text-left'
+                                }`}
+                              >
+                                {m.role === 'user' ? (
+                                  <div className="inline-block rounded-2xl px-4 py-3 shadow-sm bg-mentis-navy text-white">
+                                    {m.content}
+                                  </div>
+                                ) : (
+                                  <div className="text-mentis-navy leading-relaxed whitespace-pre-wrap">
+                                    {m.content}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {currentMessages.length > 0 && (
+                      <form
+                        className="w-full max-w-3xl mx-auto pl-4 md:pl-8"
+                        onSubmit={async (e) => {
+                        e.preventDefault()
+                        if (!chatPrompt.trim() || isSending) return
+
+                        // Si no hay chat seleccionado, crear uno nuevo
+                        let chatId = selectedChatId
+                        if (!chatId) {
+                          const subjectId = selectedSubjectId || 'language'
+                          chatId = `${subjectId}-${Date.now()}`
+                          const subjectName =
+                            subjects.find((s) => s.id === subjectId)?.name || 'Chat'
+                          const newSession: ChatSession = {
+                            id: chatId,
+                            title: `Nuevo chat · ${subjectName}`,
+                            updatedAt: 'Ahora mismo',
+                          }
+                          setChatSessions((prev) => ({
+                            ...prev,
+                            [subjectId]: [newSession, ...(prev[subjectId] || [])],
+                          }))
+                          setSelectedChatId(chatId)
+                          setSidebarMode('chats')
+                        }
+
+                        const userMessage = chatPrompt.trim()
+                        setChatPrompt('')
+
+                        // Añadir mensaje del usuario
+                        setChatMessages((prev) => ({
+                          ...prev,
+                          [chatId!]: [
+                            ...(prev[chatId!] || []),
+                            { role: 'user', content: userMessage },
+                          ],
+                        }))
+
+                        try {
+                          setIsSending(true)
+                          const currentHistory = chatMessages[chatId!] || []
+                          const res = await fetch('/api/student-chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              subjectId: selectedSubjectId,
+                              prompt: userMessage,
+                              history: currentHistory,
+                            }),
+                          })
+
+                          if (!res.ok) {
+                            throw new Error('Chat request failed')
+                          }
+
+                          const data = await res.json()
+                          const reply: string =
+                            data?.reply ??
+                            'Lo siento, ahora mismo no puedo responder.'
+
+                          // Añadir respuesta del asistente
+                          setChatMessages((prev) => ({
+                            ...prev,
+                            [chatId!]: [
+                              ...(prev[chatId!] || []),
+                              { role: 'assistant', content: reply },
+                            ],
+                          }))
+                        } catch (err) {
+                          console.error(err)
+                          setChatMessages((prev) => ({
+                            ...prev,
+                            [chatId!]: [
+                              ...(prev[chatId!] || []),
+                              {
+                                role: 'assistant',
+                                content:
+                                  'Ha ocurrido un error al contactar con el tutor. Intenta de nuevo en unos segundos.',
+                              },
+                            ],
+                          }))
+                        } finally {
+                          setIsSending(false)
+                        }
+                      }}
+                      >
+                        <div className="rounded-full bg-white border border-mentis-yellow/60 text-mentis-navy flex items-center px-6 py-3 shadow-sm">
+                          <span className="text-xl mr-3 text-mentis-navy">＋</span>
+                          <input
+                            type="text"
+                            value={chatPrompt}
+                            onChange={(e) => setChatPrompt(e.target.value)}
+                            placeholder={`Escribe aquí tu pregunta como si hablaras con tu tutor de ${subjects
+                              .find((s) => s.id === selectedSubjectId)
+                              ?.name.toLowerCase()}…`}
+                            className="flex-1 bg-transparent outline-none text-sm md:text-base placeholder:text-mentis-navy/40"
+                          />
+                          <button
+                            type="submit"
+                            disabled={isSending}
+                            className="ml-3 text-xs font-semibold uppercase tracking-[0.18em] text-mentis-navy/70 hover:text-mentis-navy disabled:opacity-40"
+                          >
+                            {isSending ? 'Enviando…' : 'Enviar'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                </section>
+              </section>
+            )}
           </>
         ) : (
           // Teacher-style summary panel (read-only, placeholder)
@@ -328,7 +839,7 @@ function StudentDashboard({ studentName }: { studentName: string }) {
             <div className="w-full max-w-md rounded-2xl bg-white shadow-xl p-6 space-y-4">
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-lg font-semibold text-mentis-navy">
-                  Crear nueva temática
+                  Crear nuevo target
                 </h2>
                 <button
                   type="button"
@@ -342,13 +853,13 @@ function StudentDashboard({ studentName }: { studentName: string }) {
               <form onSubmit={handleCreateTheme} className="space-y-4">
                 <div>
                   <label
-                    htmlFor="themeName"
+                    htmlFor="themeNameTarget"
                     className="block text-xs font-medium text-mentis-navy mb-1 uppercase tracking-wide"
                   >
-                    Nombre de la temática
+                    Nombre del target
                   </label>
                   <input
-                    id="themeName"
+                    id="themeNameTarget"
                     type="text"
                     required
                     value={newThemeName}
@@ -356,27 +867,6 @@ function StudentDashboard({ studentName }: { studentName: string }) {
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mentis-yellow focus:border-transparent outline-none text-sm"
                     placeholder="Pokémon, Lego, Animales..."
                   />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="themeIcon"
-                    className="block text-xs font-medium text-mentis-navy mb-1 uppercase tracking-wide"
-                  >
-                    Icon badge (2 letters)
-                  </label>
-                  <input
-                    id="themeIcon"
-                    type="text"
-                    maxLength={3}
-                    value={newThemeIcon}
-                    onChange={(e) => setNewThemeIcon(e.target.value.toUpperCase())}
-                    className="w-24 px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mentis-yellow focus:border-transparent outline-none text-sm text-center uppercase tracking-wide"
-                    placeholder="UV"
-                  />
-                  <p className="mt-1 text-[11px] text-mentis-navy/60">
-                    Usa 1–2 letras para identificar tu mundo (p. ej. PK, FB, AN).
-                  </p>
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">

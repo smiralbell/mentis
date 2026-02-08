@@ -72,6 +72,12 @@ We chose NextAuth.js for the following reasons:
   - Default: Email/password for admins and teachers
   - Student: UserId-based for students (MVP only)
 
+### `/api/student-chat`
+- Chat con IA para estudiantes (sesión requerida).
+- POST: `subjectId`, `prompt`, `history` (opcional).
+- Usa OpenRouter (modelo configurable vía `OPENROUTER_MODEL`, p. ej. `google/gemini-2.5-flash`).
+- System prompt: Mentis Tutor, tono pedagógico para primaria.
+
 ## Frontend Pages
 
 ### Landing Page (`/`)
@@ -96,8 +102,8 @@ We chose NextAuth.js for the following reasons:
 
 ### Dashboard (`/dashboard`)
 - Protected route (requires authentication)
-- Shows placeholder message for all roles
-- Displays user name and role
+- **Students**: TARGET ANALYSIS – selección de temáticas (Pokémon, fútbol, etc.), asignaturas (LANGUAGE, MATHS, WORLD, ENGLISH, ARTS), chat con Mentis Tutor (IA vía OpenRouter). Diseño con paleta Mentis (amarillo, navy).
+- **Admins/Teachers**: Placeholder “Under construction”
 
 ## Security Considerations
 
@@ -150,6 +156,8 @@ This MVP provides a solid foundation for:
 - Email verification
 - Password reset
 - Multi-factor authentication
+
+
 
 
 

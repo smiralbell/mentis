@@ -108,11 +108,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Database unreachable (server down, firewall, wrong host/port)
+    const isConnectionError =
+      error.name === 'PrismaClientInitializationError' ||
+      error.code === 'P1001' ||
+      (error.message && typeof error.message === 'string' && error.message.includes("Can't reach database server"))
+
+    if (isConnectionError) {
+      console.error('Database connection error:', error.message)
+      return NextResponse.json(
+        {
+          error: 'No se puede conectar a la base de datos.',
+          details: 'Comprueba que el servidor en panel.agenciabuffalo.es:5434 esté en ejecución y accesible (firewall, VPN).',
+        },
+        { status: 503 }
+      )
+    }
+
     // Check if it's a database schema error (missing columns)
     if (error.code === 'P2001' || error.message?.includes('column') || error.message?.includes('does not exist')) {
       console.error('Database schema error:', error)
       return NextResponse.json(
-        { 
+        {
           error: 'Database schema mismatch. Please add the new columns to the organizations table.',
           details: 'Run: ALTER TABLE organizations ADD COLUMN approx_student_count INTEGER; ALTER TABLE organizations ADD COLUMN admin_code VARCHAR(100);'
         },
@@ -122,7 +139,7 @@ export async function POST(request: NextRequest) {
 
     console.error('Register school error:', error)
     return NextResponse.json(
-      { 
+      {
         error: 'Failed to register school. Please try again.',
         details: process.env.NODE_ENV === 'development' ? error.message : undefined
       },
