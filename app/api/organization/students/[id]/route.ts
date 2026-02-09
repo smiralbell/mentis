@@ -3,8 +3,19 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth-config'
 import { prisma } from '@/lib/prisma'
 
+function assertOrganizer(session: { user?: { organizationId?: string; role?: string } } | null) {
+  if (!session?.user?.organizationId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  const role = session.user.role
+  if (role !== 'ORGANIZATION_ADMIN' && role !== 'TEACHER') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  return null
+}
+
 /**
- * GET: Detalle de un estudiante de la organización (solo ORGANIZATION_ADMIN / TEACHER).
+ * GET: Detalle de un estudiante (incluye guidelines y progress).
  */
 export async function GET(
   _request: NextRequest,
@@ -12,20 +23,15 @@ export async function GET(
 ) {
   try {
     const session = await getServerSession(authOptions)
-    if (!session?.user?.organizationId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-    const role = session.user.role
-    if (role !== 'ORGANIZATION_ADMIN' && role !== 'TEACHER') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    const authError = assertOrganizer(session)
+    if (authError) return authError
 
     const { id: studentId } = await params
 
     const student = await prisma.user.findFirst({
       where: {
         id: studentId,
-        organizationId: session.user.organizationId,
+        organizationId: session!.user!.organizationId,
         role: 'STUDENT',
       },
       select: {
@@ -55,6 +61,16 @@ export async function GET(
       }
     } catch (_) {}
 
+    let guidelines: { teacherPrompt: string | null; privateNotes: string | null } = { teacherPrompt: null, privateNotes: null }
+    try {
+      const g = await prisma.studentTeacherGuidelines.findUnique({
+        where: { studentId },
+      })
+      if (g) {
+        guidelines = { teacherPrompt: g.teacherPrompt, privateNotes: g.privateNotes }
+      }
+    } catch (_) {}
+
     let summaries: { id: string; content: string; createdAt: Date }[] = []
     try {
       const list = await prisma.learningSummary.findMany({
@@ -74,6 +90,7 @@ export async function GET(
         createdAt: student.createdAt,
       },
       progress,
+      guidelines,
       summaries,
     })
   } catch (e) {

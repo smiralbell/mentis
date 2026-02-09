@@ -1,8 +1,23 @@
 'use client'
 
 import { useSession, signOut } from 'next-auth/react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
+  AreaChart,
+  Area,
+} from 'recharts'
 import { getInitialGreeting } from '@/lib/mentor-chat/prompt'
 import type { MentorChatPhase, MentorChatContext } from '@/lib/mentor-chat/types'
 
@@ -80,20 +95,613 @@ type OrgStudent = {
   lastChatAt: string | null
   streak: number
   hintsUsed: number
+  segment?: 'autonomo' | 'constante_dependiente' | 'intermitente' | 'sin_actividad'
+  flags?: string[]
+  learningLevel?: 'sin_actividad' | 'bajo' | 'medio' | 'alto'
 }
 type OrgSummary = {
   id: string
   userId: string
   content: string
-  sourceType: string | null
-  sourceId: string | null
+  sourceType?: string | null
+  sourceId?: string | null
   createdAt: string
   user: { name: string }
 }
-type StudentDetail = {
-  student: { id: string; name: string; email: string | null; createdAt: string }
-  progress: { prPoints: number; lastChatAt: string | null; streak: number; hintsUsed: number }
-  summaries: { id: string; content: string; createdAt: string }[]
+
+export type OverviewResponse = {
+  days: number
+  activeOnly: boolean
+  kpis: {
+    totalStudents: number
+    totalPoints: number
+    summariesCount: number
+    activeCount: number
+    avgPoints: number
+    bestStreak: number
+    sessionsCount14d: number
+    summariesCount14d: number
+    hintsTotal14d: number | null
+    hintsAvgPerSession14d: number | null
+    activeStudents14d: number
+    inactiveStudents14d: number
+  }
+  students: { id: string; name: string; email: string | null; prPoints: number; lastChatAt: string | null; streak: number; hintsUsed: number; flags: string[] }[]
+  summaries: { id: string; userId: string; content: string; createdAt: string; user: { name: string } }[]
+  series: {
+    sessions_per_day: { date: string; label: string; sessions: number; hints: number }[]
+    hints_per_day: { date: string; label: string; sessions: number; hints: number }[]
+  }
+  top_error_tags: { tag: string; pct_sessions: number; trend: number }[] | 'N/A'
+  segmentation_counts: { autonomo: number; constante_dependiente: number; intermitente: number; sin_actividad: number }
+  alerts: { studentId: string; name: string; flags: string[] }[]
+  recommended_actions: { text: string; studentId: string | null; link: string }[]
+}
+
+const CHART_COLORS = {
+  primary: '#1e3a5f',
+  yellow: '#facc15',
+  yellowLight: '#fde047',
+  yellowDark: '#eab308',
+  green: '#22c55e',
+  orange: '#f97316',
+  gray: '#94a3b8',
+}
+
+const FLAG_LABELS: Record<string, string> = {
+  dependencia_alta: 'Dependencia alta',
+  estancamiento: 'Estancamiento',
+  inactivo_7d: 'Inactivo 7d',
+  inactivo_14d: 'Inactivo 14d',
+}
+
+const NIVEL_LABEL: Record<string, string> = {
+  sin_actividad: 'Sin actividad',
+  bajo: 'Bajo',
+  medio: 'Medio',
+  alto: 'Alto',
+}
+
+const NIVEL_STYLE: Record<string, string> = {
+  sin_actividad: 'inline-flex px-2 py-1 rounded-lg text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200',
+  bajo: 'inline-flex px-2 py-1 rounded-lg text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200',
+  medio: 'inline-flex px-2 py-1 rounded-lg text-[10px] font-semibold bg-mentis-yellow/30 text-amber-900 border border-mentis-yellow/50',
+  alto: 'inline-flex px-2 py-1 rounded-lg text-[10px] font-semibold bg-mentis-navy/15 text-mentis-navy border border-mentis-navy/30',
+}
+
+const DEPENDENCIA_LABEL: Record<string, string> = {
+  sin_actividad: 'Sin actividad',
+  autonomo: 'Autónomo',
+  constante_dependiente: 'Constante dependiente',
+  intermitente: 'Intermitente',
+}
+
+const DEPENDENCIA_STYLE: Record<string, string> = {
+  sin_actividad: 'inline-flex px-2 py-1 rounded-lg text-[10px] font-medium bg-slate-100 text-slate-500 border border-slate-200',
+  autonomo: 'inline-flex px-2 py-1 rounded-lg text-[10px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200',
+  constante_dependiente: 'inline-flex px-2 py-1 rounded-lg text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-200',
+  intermitente: 'inline-flex px-2 py-1 rounded-lg text-[10px] font-medium bg-mentis-yellow/20 text-mentis-navy/90 border border-mentis-yellow/40',
+}
+
+function OrganizerOverviewCharts({
+  overview,
+  overviewLoading,
+  overviewError,
+  days,
+  onDaysChange,
+  activeOnly,
+  onActiveOnlyChange,
+}: {
+  overview: OverviewResponse | null
+  overviewLoading: boolean
+  overviewError: string | null
+  days: number
+  onDaysChange: (d: number) => void
+  activeOnly: boolean
+  onActiveOnlyChange: (v: boolean) => void
+}) {
+  const kpis = overview?.kpis
+  const students = overview?.students ?? []
+  const summaries = overview?.summaries ?? []
+  const totalStudents = kpis?.totalStudents ?? 0
+  const totalPoints = kpis?.totalPoints ?? 0
+  const avgPoints = kpis?.avgPoints ?? 0
+  const activeWithChat = kpis?.activeCount ?? 0
+  const bestStreak = kpis?.bestStreak ?? 0
+  const engagementPercent = totalStudents > 0 ? Math.round((activeWithChat / totalStudents) * 100) : 0
+  const noActivity = kpis?.inactiveStudents14d ?? 0
+  const totalHints = students.reduce((acc, s) => acc + s.hintsUsed, 0)
+  const avgHints = activeWithChat > 0 ? Math.round(totalHints / activeWithChat) : 0
+
+  const barData = useMemo(() => {
+    return [...students]
+      .sort((a, b) => b.prPoints - a.prPoints)
+      .slice(0, 10)
+      .map((s) => ({ name: s.name.split(' ')[0], puntos: s.prPoints, fullName: s.name }))
+  }, [students])
+
+  const donutData = useMemo(() => {
+    const alto = students.filter((s) => s.prPoints >= 150).length
+    const medio = students.filter((s) => s.prPoints >= 50 && s.prPoints < 150).length
+    const bajo = students.filter((s) => s.prPoints >= 1 && s.prPoints < 50).length
+    const sinActividad = students.filter((s) => s.prPoints === 0).length
+    return [
+      { label: 'Alto (≥150 pts)', value: alto, color: '#1e3a5f' },
+      { label: 'Medio (50-149)', value: medio, color: '#334a6f' },
+      { label: 'Bajo (1-49)', value: bajo, color: '#eab308' },
+      { label: 'Sin actividad', value: sinActividad, color: '#94a3b8' },
+    ].filter((d) => d.value > 0)
+  }, [students])
+
+  const activityByDay = useMemo(() => {
+    const series = overview?.series?.sessions_per_day ?? []
+    return series.map((d) => ({
+      date: d.date,
+      resúmenes: d.sessions,
+      label: d.label,
+    }))
+  }, [overview?.series])
+
+  const topStreaks = useMemo(
+    () => [...students].sort((a, b) => b.streak - a.streak).slice(0, 5),
+    [students]
+  )
+
+  const rawHintsPerDay = overview?.series?.hints_per_day ?? []
+  const hintsTotal = overview?.kpis?.hintsTotal14d ?? 0
+  const hintsPerDaySeries = useMemo(() => {
+    if (rawHintsPerDay.some((d) => d.hints > 0)) return rawHintsPerDay
+    if (hintsTotal <= 0 || rawHintsPerDay.length === 0) return rawHintsPerDay
+    const copy = rawHintsPerDay.map((d) => ({ ...d, hints: 0 }))
+    const lastIdx = copy.length - 1
+    copy[lastIdx] = { ...copy[lastIdx], hints: hintsTotal }
+    return copy
+  }, [rawHintsPerDay, hintsTotal])
+  const segmentation = overview?.segmentation_counts
+  const segmentDonutData = segmentation
+    ? [
+        { label: 'Autónomo', value: segmentation.autonomo, color: '#1e3a5f' },
+        { label: 'Constante dependiente', value: segmentation.constante_dependiente, color: '#334a6f' },
+        { label: 'Intermitente', value: segmentation.intermitente, color: '#eab308' },
+        { label: 'Sin actividad', value: segmentation.sin_actividad, color: '#94a3b8' },
+      ].filter((d) => d.value > 0)
+    : []
+
+  if (overviewLoading && !overview) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <p className="text-mentis-navy/60">Cargando vista general…</p>
+      </div>
+    )
+  }
+  if (overviewError && !overview) {
+    return (
+      <div className="rounded-2xl bg-red-50 border border-red-200 p-6 text-red-800">
+        {overviewError}
+      </div>
+    )
+  }
+  if (!overview) {
+    return null
+  }
+
+  return (
+    <div className="space-y-10">
+      {/* Hero + Filtros */}
+      <div className="rounded-3xl bg-gradient-to-br from-mentis-navy/8 via-white/90 to-mentis-yellow/10 border border-mentis-yellow/30 shadow-lg p-6 md:p-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
+          <div>
+            <h2 className="text-xl md:text-2xl font-bold text-mentis-navy tracking-tight">
+              Vista general
+            </h2>
+            <p className="text-sm text-mentis-navy/60 mt-1">
+              Últimos {days} días · {overview.activeOnly ? 'Solo activos' : 'Todos los alumnos'}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/50">Período</span>
+            <div className="flex rounded-2xl bg-white/90 border border-mentis-yellow/40 shadow-inner p-1">
+              {([7, 14, 30] as const).map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => onDaysChange(d)}
+                  className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${days === d ? 'bg-mentis-yellow text-mentis-navy shadow-md' : 'text-mentis-navy/60 hover:bg-mentis-yellow/20 hover:text-mentis-navy'}`}
+                >
+                  {d} d
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-2.5 cursor-pointer pl-1">
+              <input
+                type="checkbox"
+                checked={activeOnly}
+                onChange={(e) => onActiveOnlyChange(e.target.checked)}
+                className="rounded border-mentis-navy/30 text-mentis-navy focus:ring-mentis-yellow size-4"
+              />
+              <span className="text-sm font-medium text-mentis-navy/80">Solo activos</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="rounded-2xl bg-white shadow-md border border-mentis-yellow/20 p-5 md:p-6 hover:shadow-lg transition-shadow">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-mentis-navy/50">Estudiantes</p>
+          <p className="text-3xl md:text-4xl font-bold text-mentis-navy mt-1 tracking-tight">{totalStudents}</p>
+        </div>
+        <div className="rounded-2xl bg-white shadow-md border border-mentis-yellow/20 p-5 md:p-6 hover:shadow-lg transition-shadow">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-mentis-navy/50">Puntos totales</p>
+          <p className="text-3xl md:text-4xl font-bold text-mentis-navy mt-1 tracking-tight">{totalPoints}</p>
+        </div>
+        <div className="rounded-2xl bg-white shadow-md border border-mentis-yellow/20 p-5 md:p-6 hover:shadow-lg transition-shadow">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-mentis-navy/50">Resúmenes</p>
+          <p className="text-3xl md:text-4xl font-bold text-mentis-navy mt-1 tracking-tight">{summaries.length}</p>
+        </div>
+        <div className="rounded-2xl bg-mentis-yellow/30 shadow-md border border-mentis-yellow/50 p-5 md:p-6 hover:shadow-lg transition-shadow">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-amber-800/80">Activos</p>
+          <p className="text-3xl md:text-4xl font-bold text-mentis-navy mt-1 tracking-tight">{activeWithChat}</p>
+          <p className="text-[10px] text-mentis-navy/60 mt-0.5">{engagementPercent}% con chat</p>
+        </div>
+        <div className="rounded-2xl bg-white shadow-md border border-mentis-yellow/20 p-5 md:p-6 hover:shadow-lg transition-shadow">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-mentis-navy/50">Media puntos</p>
+          <p className="text-3xl md:text-4xl font-bold text-mentis-navy mt-1 tracking-tight">{avgPoints}</p>
+        </div>
+        <div className="rounded-2xl bg-white shadow-md border border-mentis-yellow/20 p-5 md:p-6 hover:shadow-lg transition-shadow">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-mentis-navy/50">Mejor racha</p>
+          <p className="text-3xl md:text-4xl font-bold text-mentis-navy mt-1 tracking-tight">{bestStreak}</p>
+        </div>
+      </div>
+
+      {/* Fila A: Alertas + Acciones */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="rounded-3xl bg-white shadow-xl border border-mentis-yellow/20 overflow-hidden">
+          <div className="px-6 py-4 border-b border-mentis-yellow/20 bg-mentis-navy/5">
+            <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider">
+              Alertas pedagógicas
+            </h3>
+            <p className="text-[10px] text-mentis-navy/50 mt-0.5">Alumnos que requieren atención</p>
+          </div>
+          <div className="p-6 md:p-8">
+            {overview.alerts.length === 0 ? (
+              <p className="text-sm text-mentis-navy/50 py-4">Ninguna alerta en el período.</p>
+            ) : (
+              <ul className="space-y-3">
+                {overview.alerts.slice(0, 5).map((a) => (
+                  <li key={a.studentId} className="flex flex-wrap items-center justify-between gap-3 py-3.5 px-4 rounded-2xl bg-mentis-navy/[0.04] border border-mentis-yellow/20 hover:border-mentis-yellow/40 transition-colors">
+                    <span className="font-semibold text-mentis-navy">{a.name}</span>
+                    <div className="flex flex-wrap gap-2">
+                      {a.flags.map((f) => (
+                        <span key={f} className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-amber-100/90 text-amber-800 border border-amber-200/60">
+                          {FLAG_LABELS[f] ?? f}
+                        </span>
+                      ))}
+                    </div>
+                    <Link href={`/organizer/students/${a.studentId}`} className="shrink-0 text-xs font-bold text-mentis-navy uppercase tracking-wider hover:underline">
+                      Ver alumno →
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+        <div className="rounded-3xl bg-white shadow-xl border border-mentis-yellow/20 overflow-hidden">
+          <div className="px-6 py-4 border-b border-mentis-yellow/20 bg-mentis-navy/5">
+            <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider">
+              Acciones recomendadas
+            </h3>
+            <p className="text-[10px] text-mentis-navy/50 mt-0.5">Siguiente paso sugerido</p>
+          </div>
+          <div className="p-6 md:p-8">
+            {overview.recommended_actions.length === 0 ? (
+              <p className="text-sm text-mentis-navy/50 py-4">Nada pendiente.</p>
+            ) : (
+              <ul className="space-y-3">
+                {overview.recommended_actions.map((action, i) => (
+                  <li key={i}>
+                    <Link href={action.link} className="flex items-start gap-3 py-2.5 px-4 rounded-2xl bg-mentis-navy/[0.04] border border-transparent hover:border-mentis-yellow/30 hover:bg-mentis-yellow/10 transition-all group">
+                      <span className="shrink-0 w-6 h-6 rounded-full bg-mentis-yellow/30 text-mentis-navy font-bold text-xs flex items-center justify-center group-hover:bg-mentis-yellow/50">{i + 1}</span>
+                      <span className="text-sm text-mentis-navy/90 group-hover:text-mentis-navy font-medium">{action.text}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Gráficos principales */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="xl:col-span-2 rounded-3xl bg-white shadow-xl border border-mentis-yellow/20 overflow-hidden">
+          <div className="px-6 py-4 border-b border-mentis-yellow/20 bg-mentis-navy/5">
+            <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider">Puntos PR por estudiante</h3>
+            <p className="text-[10px] text-mentis-navy/50 mt-0.5">Comparativa en el período</p>
+          </div>
+          <div className="p-6 md:p-8">
+            <div className="h-80">
+              {barData.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-mentis-navy/40 text-sm">Sin datos aún</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={barData} layout="vertical" margin={{ left: 4, right: 32, top: 4, bottom: 4 }}>
+                    <XAxis type="number" tick={{ fontSize: 12, fill: CHART_COLORS.primary }} />
+                    <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 12, fill: CHART_COLORS.primary }} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 40px rgba(30,58,95,0.12)' }}
+                      formatter={(value: number) => [value, 'Puntos PR']}
+                      labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName ?? ''}
+                    />
+                    <Bar dataKey="puntos" fill={CHART_COLORS.yellow} radius={[0, 8, 8, 0]} name="Puntos" />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-3xl bg-white shadow-xl border border-mentis-yellow/20 overflow-hidden">
+          <div className="px-6 py-4 border-b border-mentis-yellow/20 bg-mentis-navy/5">
+            <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider">Nivel de puntos</h3>
+            <p className="text-[10px] text-mentis-navy/50 mt-0.5">Distribución por rango</p>
+          </div>
+          <div className="p-6 md:p-8">
+            <div className="h-80 flex items-center justify-center">
+              {donutData.length === 0 ? (
+                <p className="text-mentis-navy/40 text-sm">Sin datos aún</p>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={donutData}
+                      dataKey="value"
+                      nameKey="label"
+                      cx="50%"
+                      cy="45%"
+                      innerRadius={64}
+                      outerRadius={100}
+                      paddingAngle={2}
+                      label={false}
+                      labelLine={false}
+                    >
+                      {donutData.map((entry) => (
+                        <Cell key={entry.label} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 40px rgba(30,58,95,0.12)' }}
+                      formatter={(value: number) => [value, 'estudiantes']}
+                    />
+                    <Legend
+                      layout="horizontal"
+                      align="center"
+                      verticalAlign="bottom"
+                      iconType="circle"
+                      iconSize={8}
+                      wrapperStyle={{ paddingTop: 16 }}
+                      formatter={(value) => <span className="text-xs text-mentis-navy/80">{value}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Dependencia + Progreso */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="rounded-3xl bg-white shadow-xl border border-mentis-yellow/20 overflow-hidden">
+          <div className="px-6 py-4 border-b border-mentis-yellow/20 bg-mentis-navy/5">
+            <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider">Dependencia y autonomía</h3>
+            <p className="text-[10px] text-mentis-navy/50 mt-0.5">Pistas por día en el período</p>
+          </div>
+          <div className="p-6 md:p-8">
+            <p className="text-xs text-mentis-navy/55 mb-4">
+              Pistas por día (últimos {days} días). Sin datos históricos de pistas se muestra valor actual.
+            </p>
+            <div className="h-56">
+              {hintsPerDaySeries.length > 0 && hintsPerDaySeries.some((d) => d.hints > 0) ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={hintsPerDaySeries} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
+                    <defs>
+                      <linearGradient id="hintsGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={CHART_COLORS.primary} stopOpacity={0.3} />
+                        <stop offset="100%" stopColor={CHART_COLORS.primary} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: CHART_COLORS.primary }} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: CHART_COLORS.primary }} />
+                    <Tooltip contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 40px rgba(30,58,95,0.12)' }}/>
+                    <Area type="monotone" dataKey="hints" stroke={CHART_COLORS.primary} strokeWidth={2} fill="url(#hintsGradient)" name="Pistas" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-mentis-navy/50 text-sm">
+                  <p className="font-medium text-mentis-navy/70">Media: {kpis?.hintsAvgPerSession14d ?? avgHints} pistas/sesión</p>
+                  <p className="text-[10px] mt-1">Cuando los alumnos usen pistas, aquí verás la evolución por día.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="rounded-3xl bg-white shadow-xl border border-mentis-yellow/20 overflow-hidden">
+          <div className="px-6 py-4 border-b border-mentis-yellow/20 bg-mentis-navy/5">
+            <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider">Progreso del grupo</h3>
+            <p className="text-[10px] text-mentis-navy/50 mt-0.5">Sesiones e índice de mejora</p>
+          </div>
+          <div className="p-6 md:p-8">
+            <p className="text-xs text-mentis-navy/55 mb-4">
+              Sesiones en el período: {kpis?.sessionsCount14d ?? 0}. Puntos totales repartidos en resúmenes.
+            </p>
+            <div className="h-56 flex items-center justify-center">
+              <div className="text-center">
+                <p className="text-3xl font-bold text-mentis-navy">{kpis?.sessionsCount14d ?? 0}</p>
+                <p className="text-[10px] text-mentis-navy/55 mt-1">sesiones últimos {days} d</p>
+                {typeof totalPoints === 'number' && (kpis?.sessionsCount14d ?? 0) > 0 && (
+                  <p className="text-lg font-semibold text-mentis-navy/90 mt-4">
+                    {Math.round(totalPoints / (kpis?.sessionsCount14d ?? 1))} pts/sesión
+                  </p>
+                )}
+                <p className="text-[10px] text-mentis-navy/50 mt-1">Mejora semanal con checkpoints (próximamente)</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Errores + Segmentación */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="rounded-3xl bg-white shadow-xl border border-mentis-yellow/20 overflow-hidden">
+          <div className="px-6 py-4 border-b border-mentis-yellow/20 bg-mentis-navy/5">
+            <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider">Errores frecuentes</h3>
+            <p className="text-[10px] text-mentis-navy/50 mt-0.5">Top conceptos a reforzar</p>
+          </div>
+          <div className="p-6 md:p-8">
+            {overview.top_error_tags === 'N/A' || overview.top_error_tags.length === 0 ? (
+              <p className="text-sm text-mentis-navy/50">N/A — Integrar tags cuando existan en el sistema.</p>
+            ) : (
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={overview.top_error_tags} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
+                    <XAxis dataKey="tag" tick={{ fontSize: 10, fill: CHART_COLORS.primary }} />
+                    <YAxis tick={{ fontSize: 11, fill: CHART_COLORS.primary }} />
+                    <Tooltip contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 40px rgba(30,58,95,0.12)' }}/>
+                    <Bar dataKey="pct_sessions" fill={CHART_COLORS.yellow} radius={[4, 4, 0, 0]} name="% sesiones" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="rounded-3xl bg-white shadow-xl border border-mentis-yellow/20 overflow-hidden">
+          <div className="px-6 py-4 border-b border-mentis-yellow/20 bg-mentis-navy/5">
+            <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider">Segmentación de alumnos</h3>
+            <p className="text-[10px] text-mentis-navy/50 mt-0.5">Perfiles por autonomía y actividad</p>
+          </div>
+          <div className="p-6 md:p-8">
+            <div className="h-64 flex items-center justify-center">
+              {segmentDonutData.length === 0 ? (
+                <p className="text-mentis-navy/40 text-sm">Sin datos</p>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={segmentDonutData}
+                      dataKey="value"
+                      nameKey="label"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={56}
+                      outerRadius={88}
+                      paddingAngle={2}
+                      label={false}
+                      labelLine={false}
+                    >
+                      {segmentDonutData.map((entry) => (
+                        <Cell key={entry.label} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 40px rgba(30,58,95,0.12)' }} formatter={(v: number) => [v, 'alumnos']} />
+                    <Legend layout="horizontal" align="center" verticalAlign="bottom" iconType="circle" iconSize={8} wrapperStyle={{ paddingTop: 12 }} formatter={(v) => <span className="text-xs text-mentis-navy/80">{v}</span>} />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Resúmenes por día + Insights */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 rounded-3xl bg-white shadow-xl border border-mentis-yellow/20 overflow-hidden">
+          <div className="px-6 py-4 border-b border-mentis-yellow/20 bg-mentis-navy/5">
+            <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider">Resúmenes por día</h3>
+            <p className="text-[10px] text-mentis-navy/50 mt-0.5">Últimos 14 días</p>
+          </div>
+          <div className="p-6 md:p-8">
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={activityByDay} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
+                  <defs>
+                    <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={CHART_COLORS.yellow} stopOpacity={0.35} />
+                      <stop offset="100%" stopColor={CHART_COLORS.yellow} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: CHART_COLORS.primary }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: CHART_COLORS.primary }} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 40px rgba(30,58,95,0.12)' }}
+                    labelFormatter={(_, payload) => payload?.[0]?.payload?.date ? new Date(payload[0].payload.date).toLocaleDateString('es-ES') : ''}
+                    formatter={(value: number) => [value, 'resúmenes']}
+                  />
+                  <Area type="monotone" dataKey="resúmenes" stroke={CHART_COLORS.yellowDark} strokeWidth={2.5} fill="url(#areaGradient)" name="Resúmenes" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-3xl bg-mentis-navy/8 shadow-xl border border-mentis-yellow/20 overflow-hidden flex flex-col">
+          <div className="px-6 py-4 border-b border-mentis-yellow/20 bg-mentis-navy/10">
+            <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider">Resumen</h3>
+            <p className="text-[10px] text-mentis-navy/50 mt-0.5">Pistas y actividad</p>
+          </div>
+          <div className="p-6 md:p-8 flex-1">
+            <div className="space-y-5">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-mentis-navy/50">Pistas usadas (total)</p>
+                <p className="text-2xl font-bold text-mentis-navy mt-0.5">{totalHints}</p>
+                <p className="text-xs text-mentis-navy/55 mt-0.5">Media {avgHints} por activo</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-mentis-navy/50">Sin actividad aún</p>
+                <p className="text-2xl font-bold text-mentis-navy mt-0.5">{noActivity}</p>
+                <p className="text-xs text-mentis-navy/55 mt-0.5">Estudiantes por conectar</p>
+              </div>
+              <p className="text-sm text-mentis-navy/70 leading-relaxed pt-2">
+                Los puntos PR se ganan con respuestas en el chat. Las rachas premian la constancia. Revisa la pestaña Estudiantes para el detalle por alumno.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Rachas + CTA */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="rounded-3xl bg-white shadow-xl border border-mentis-yellow/20 overflow-hidden">
+          <div className="px-6 py-4 border-b border-mentis-yellow/20 bg-mentis-navy/5">
+            <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider">Rachas destacadas</h3>
+            <p className="text-[10px] text-mentis-navy/50 mt-0.5">Días consecutivos con actividad</p>
+          </div>
+          <div className="p-6 md:p-8">
+            {topStreaks.length === 0 ? (
+              <p className="text-mentis-navy/40 text-sm">Sin datos aún</p>
+            ) : (
+              <ul className="space-y-3">
+                {topStreaks.map((s) => (
+                  <li key={s.id} className="flex items-center justify-between py-3 px-4 rounded-2xl bg-mentis-navy/[0.04] border border-mentis-yellow/20 hover:border-mentis-yellow/40 transition-colors">
+                    <span className="font-semibold text-mentis-navy">{s.name}</span>
+                    <span className="text-lg font-bold text-mentis-navy tabular-nums">{s.streak ?? 0} días</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-3xl bg-gradient-to-br from-mentis-yellow/25 to-mentis-navy/10 shadow-xl border border-mentis-yellow/40 overflow-hidden p-6 md:p-8 flex flex-col justify-center">
+          <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider mb-2">Vista detallada</h3>
+          <p className="text-sm text-mentis-navy/75 leading-relaxed">
+            En la pestaña <strong>Estudiantes</strong> verás la lista con email, puntos y último chat. Haz clic en una fila para abrir el detalle con resúmenes y mini-prompt del profesor.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function OrganizerDashboard({
@@ -111,9 +719,80 @@ function OrganizerDashboard({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<'overview' | 'students' | 'summaries'>('overview')
-  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null)
-  const [detailData, setDetailData] = useState<StudentDetail | null>(null)
-  const [detailLoading, setDetailLoading] = useState(false)
+  const router = useRouter()
+
+  const [overviewData, setOverviewData] = useState<OverviewResponse | null>(null)
+  const [overviewLoading, setOverviewLoading] = useState(false)
+  const [overviewError, setOverviewError] = useState<string | null>(null)
+  const [overviewDays, setOverviewDays] = useState(14)
+  const [overviewActiveOnly, setOverviewActiveOnly] = useState(false)
+
+  type StudentsSortKey = 'name' | 'nivel' | 'dependencia' | 'puntos' | 'racha' | 'pistas' | 'alertas' | 'ultimo_chat'
+  const [studentsSortKey, setStudentsSortKey] = useState<StudentsSortKey | null>(null)
+  const [studentsSortDir, setStudentsSortDir] = useState<'asc' | 'desc'>('desc')
+  const [studentsSearch, setStudentsSearch] = useState('')
+
+  const NIVEL_ORDER: Record<string, number> = { sin_actividad: 0, bajo: 1, medio: 2, alto: 3 }
+  const SEGMENT_ORDER: Record<string, number> = { sin_actividad: 0, intermitente: 1, constante_dependiente: 2, autonomo: 3 }
+
+  const sortedStudents = useMemo(() => {
+    if (!data?.students.length) return []
+    const list = [...data.students]
+    if (!studentsSortKey) return list
+    const dir = studentsSortDir === 'asc' ? 1 : -1
+    list.sort((a, b) => {
+      let cmp = 0
+      switch (studentsSortKey) {
+        case 'name':
+          cmp = (a.name ?? '').localeCompare(b.name ?? '')
+          break
+        case 'nivel':
+          cmp = (NIVEL_ORDER[a?.learningLevel ?? 'sin_actividad'] ?? 0) - (NIVEL_ORDER[b?.learningLevel ?? 'sin_actividad'] ?? 0)
+          break
+        case 'dependencia':
+          cmp = (SEGMENT_ORDER[a?.segment ?? 'sin_actividad'] ?? 0) - (SEGMENT_ORDER[b?.segment ?? 'sin_actividad'] ?? 0)
+          break
+        case 'puntos':
+          cmp = (a.prPoints ?? 0) - (b.prPoints ?? 0)
+          break
+        case 'racha':
+          cmp = (a.streak ?? 0) - (b.streak ?? 0)
+          break
+        case 'pistas':
+          cmp = (a.hintsUsed ?? 0) - (b.hintsUsed ?? 0)
+          break
+        case 'alertas':
+          cmp = (a.flags?.length ?? 0) - (b.flags?.length ?? 0)
+          break
+        case 'ultimo_chat':
+          cmp = (a.lastChatAt ? new Date(a.lastChatAt).getTime() : 0) - (b.lastChatAt ? new Date(b.lastChatAt).getTime() : 0)
+          break
+        default:
+          return 0
+      }
+      return dir * (cmp || (a.name ?? '').localeCompare(b.name ?? ''))
+    })
+    return list
+  }, [data?.students, studentsSortKey, studentsSortDir])
+
+  const filteredStudents = useMemo(() => {
+    if (!studentsSearch.trim()) return sortedStudents
+    const q = studentsSearch.trim().toLowerCase()
+    return sortedStudents.filter(
+      (s) =>
+        (s.name ?? '').toLowerCase().includes(q) ||
+        (s.email ?? '').toLowerCase().includes(q)
+    )
+  }, [sortedStudents, studentsSearch])
+
+  const handleStudentsSort = (key: StudentsSortKey) => {
+    if (studentsSortKey === key) {
+      setStudentsSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setStudentsSortKey(key)
+      setStudentsSortDir('desc')
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -135,54 +814,93 @@ function OrganizerDashboard({
   }, [])
 
   useEffect(() => {
-    if (!selectedStudentId) {
-      setDetailData(null)
-      return
-    }
+    if (tab !== 'overview') return
     let cancelled = false
-    setDetailLoading(true)
-    fetch(`/api/organization/students/${selectedStudentId}`)
+    setOverviewLoading(true)
+    setOverviewError(null)
+    fetch(`/api/organization/overview?days=${overviewDays}&activeOnly=${overviewActiveOnly}`)
       .then((res) => {
-        if (!res.ok) throw new Error('Error al cargar detalle')
+        if (!res.ok) throw new Error('Error al cargar vista general')
         return res.json()
       })
       .then((json) => {
-        if (!cancelled) setDetailData(json)
+        if (!cancelled) setOverviewData(json)
       })
-      .catch(() => {
-        if (!cancelled) setDetailData(null)
+      .catch((err) => {
+        if (!cancelled) setOverviewError(err.message ?? 'Error')
       })
       .finally(() => {
-        if (!cancelled) setDetailLoading(false)
+        if (!cancelled) setOverviewLoading(false)
       })
     return () => { cancelled = true }
-  }, [selectedStudentId])
+  }, [tab, overviewDays, overviewActiveOnly])
 
   const roleLabel = userRole === 'ORGANIZATION_ADMIN' ? 'Organizador' : 'Profesor'
 
   return (
     <div className="min-h-screen bg-[#FFF7E6]">
-      <header className="sticky top-0 z-20 border-b border-mentis-yellow/40 bg-white/95 backdrop-blur-sm">
-        <div className="max-w-6xl mx-auto px-4 md:px-8 py-4 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold text-mentis-navy tracking-tight">
-              Centre de pilotage
-            </h1>
-            <p className="text-xs md:text-sm text-mentis-navy/60 mt-0.5">
+      <header className="sticky top-0 z-20 border-b border-mentis-yellow/40 bg-white/95 backdrop-blur-sm shadow-sm">
+        <div className="w-full max-w-[140rem] mx-auto px-4 md:px-6 lg:px-10 xl:px-12 py-3 flex flex-wrap items-center justify-between gap-3 md:gap-6">
+          <div className="flex items-center gap-3 md:gap-4 min-w-0">
+            <img
+              src="https://www.mentislearn.com/wp-content/uploads/2026/02/WhatsApp_Image_2026-01-16_at_14.33.09__2_-removebg-preview.png"
+              alt="Mentis"
+              className="h-12 md:h-14 w-auto object-contain shrink-0"
+            />
+            <p className="text-xs md:text-sm text-mentis-navy/60 hidden sm:block truncate">
               {userName} · {roleLabel}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => signOut({ callbackUrl: '/' })}
-            className="rounded-full border border-mentis-navy/20 px-4 py-2 text-sm font-medium text-mentis-navy/80 hover:bg-mentis-navy hover:text-white transition-colors"
-          >
-            Cerrar sesión
-          </button>
+
+          <nav className="flex items-center rounded-2xl bg-mentis-yellow/10 border border-mentis-yellow/40 p-1 shadow-inner" aria-label="Secciones del panel">
+            <button
+              type="button"
+              onClick={() => setTab('overview')}
+              className={`px-4 md:px-5 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all duration-200 ${
+                tab === 'overview'
+                  ? 'bg-white text-mentis-navy shadow-md border border-mentis-yellow/50'
+                  : 'text-mentis-navy/70 hover:bg-white/60 hover:text-mentis-navy'
+              }`}
+            >
+              Vista general
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab('students')}
+              className={`px-4 md:px-5 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all duration-200 ${
+                tab === 'students'
+                  ? 'bg-white text-mentis-navy shadow-md border border-mentis-yellow/50'
+                  : 'text-mentis-navy/70 hover:bg-white/60 hover:text-mentis-navy'
+              }`}
+            >
+              Estudiantes
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab('summaries')}
+              className={`px-4 md:px-5 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all duration-200 ${
+                tab === 'summaries'
+                  ? 'bg-white text-mentis-navy shadow-md border border-mentis-yellow/50'
+                  : 'text-mentis-navy/70 hover:bg-white/60 hover:text-mentis-navy'
+              }`}
+            >
+              Resúmenes
+            </button>
+          </nav>
+
+          <div className="flex items-center shrink-0">
+            <button
+              type="button"
+              onClick={() => signOut({ callbackUrl: '/' })}
+              className="rounded-full border border-mentis-navy/20 px-3 md:px-4 py-2 text-xs md:text-sm font-medium text-mentis-navy/80 hover:bg-mentis-navy hover:text-white transition-colors"
+            >
+              Cerrar sesión
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 md:px-8 py-8">
+      <main className="w-full max-w-[140rem] mx-auto px-4 md:px-6 lg:px-10 xl:px-12 py-6 md:py-8">
         {loading && (
           <div className="flex items-center justify-center py-20">
             <p className="text-mentis-navy/60">Cargando datos de la organización…</p>
@@ -195,251 +913,257 @@ function OrganizerDashboard({
         )}
         {!loading && !error && data && (
           <>
-            <div className="flex rounded-2xl bg-white/80 border border-mentis-yellow/50 p-1.5 shadow-sm gap-1 mb-6">
-              <button
-                type="button"
-                onClick={() => { setTab('overview'); setSelectedStudentId(null) }}
-                className={`flex-1 min-w-0 py-2.5 px-3 rounded-xl text-[11px] font-semibold uppercase tracking-wider transition-all ${
-                  tab === 'overview'
-                    ? 'bg-mentis-yellow text-mentis-navy shadow-md'
-                    : 'text-mentis-navy/70 hover:bg-mentis-yellow/20'
-                }`}
-              >
-                Vista general
-              </button>
-              <button
-                type="button"
-                onClick={() => { setTab('students'); setSelectedStudentId(null) }}
-                className={`flex-1 min-w-0 py-2.5 px-3 rounded-xl text-[11px] font-semibold uppercase tracking-wider transition-all ${
-                  tab === 'students'
-                    ? 'bg-mentis-yellow text-mentis-navy shadow-md'
-                    : 'text-mentis-navy/70 hover:bg-mentis-yellow/20'
-                }`}
-              >
-                Estudiantes
-              </button>
-              <button
-                type="button"
-                onClick={() => setTab('summaries')}
-                className={`flex-1 min-w-0 py-2.5 px-3 rounded-xl text-[11px] font-semibold uppercase tracking-wider transition-all ${
-                  tab === 'summaries'
-                    ? 'bg-mentis-yellow text-mentis-navy shadow-md'
-                    : 'text-mentis-navy/70 hover:bg-mentis-yellow/20'
-                }`}
-              >
-                Resúmenes
-              </button>
-            </div>
-
             {tab === 'overview' && (
-              <div className="space-y-8">
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="rounded-2xl bg-white border border-mentis-yellow/50 shadow-sm p-5">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/60">Estudiantes</p>
-                    <p className="text-3xl font-bold text-mentis-navy mt-1">{data.totalStudents}</p>
-                  </div>
-                  <div className="rounded-2xl bg-white border border-mentis-yellow/50 shadow-sm p-5">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/60">Puntos totales</p>
-                    <p className="text-3xl font-bold text-mentis-navy mt-1">
-                      {data.students.reduce((acc, s) => acc + (s.prPoints ?? 0), 0)}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl bg-white border border-mentis-yellow/50 shadow-sm p-5">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/60">Resúmenes</p>
-                    <p className="text-3xl font-bold text-mentis-navy mt-1">{data.summaries.length}</p>
-                  </div>
-                  <div className="rounded-2xl bg-mentis-yellow/20 border border-mentis-yellow/50 shadow-sm p-5">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-700/90">Media puntos</p>
-                    <p className="text-3xl font-bold text-mentis-navy mt-1">
-                      {data.totalStudents === 0 ? 0 : Math.round(data.students.reduce((a, s) => a + (s.prPoints ?? 0), 0) / data.totalStudents)}
-                    </p>
-                  </div>
-                </div>
-                <div className="rounded-2xl bg-white border border-mentis-yellow/50 shadow-md overflow-hidden">
-                  <div className="px-4 md:px-6 py-3 border-b border-mentis-yellow/40">
-                    <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider">Ranking por puntos PR</h3>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                      <thead>
-                        <tr className="border-b border-mentis-yellow/30 bg-mentis-navy/5">
-                          <th className="px-4 md:px-6 py-2 text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70">#</th>
-                          <th className="px-4 md:px-6 py-2 text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70">Estudiante</th>
-                          <th className="px-4 md:px-6 py-2 text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70 text-right">Puntos</th>
-                          <th className="px-4 md:px-6 py-2 text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70 text-right">Racha</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-mentis-yellow/20">
-                        {[...data.students]
-                          .sort((a, b) => (b.prPoints ?? 0) - (a.prPoints ?? 0))
-                          .slice(0, 10)
-                          .map((s, i) => (
-                            <tr key={s.id} className="hover:bg-mentis-yellow/5">
-                              <td className="px-4 md:px-6 py-3 text-mentis-navy/60 font-medium">{i + 1}</td>
-                              <td className="px-4 md:px-6 py-3 font-medium text-mentis-navy">{s.name}</td>
-                              <td className="px-4 md:px-6 py-3 text-right font-bold text-mentis-navy">{s.prPoints ?? 0}</td>
-                              <td className="px-4 md:px-6 py-3 text-right text-mentis-navy/80">{s.streak ?? 0}</td>
-                            </tr>
-                          ))}
-                        {data.students.length === 0 && (
-                          <tr>
-                            <td colSpan={4} className="px-4 md:px-6 py-8 text-center text-mentis-navy/50 text-sm">Sin datos aún</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-                <div className="rounded-2xl bg-white border border-mentis-yellow/50 shadow-md overflow-hidden">
-                  <div className="px-4 md:px-6 py-3 border-b border-mentis-yellow/40">
-                    <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider">Última actividad en chat</h3>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                      <thead>
-                        <tr className="border-b border-mentis-yellow/30 bg-mentis-navy/5">
-                          <th className="px-4 md:px-6 py-2 text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70">Estudiante</th>
-                          <th className="px-4 md:px-6 py-2 text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70 text-right">Último chat</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-mentis-yellow/20">
-                        {[...data.students]
-                          .filter((s) => s.lastChatAt)
-                          .sort((a, b) => new Date(b.lastChatAt!).getTime() - new Date(a.lastChatAt!).getTime())
-                          .slice(0, 10)
-                          .map((s) => (
-                            <tr key={s.id} className="hover:bg-mentis-yellow/5">
-                              <td className="px-4 md:px-6 py-3 font-medium text-mentis-navy">{s.name}</td>
-                              <td className="px-4 md:px-6 py-3 text-right text-sm text-mentis-navy/80">
-                                {new Date(s.lastChatAt!).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                              </td>
-                            </tr>
-                          ))}
-                        {data.students.filter((s) => s.lastChatAt).length === 0 && (
-                          <tr>
-                            <td colSpan={2} className="px-4 md:px-6 py-8 text-center text-mentis-navy/50 text-sm">Ninguna actividad aún</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
+              <OrganizerOverviewCharts
+                overview={overviewData}
+                overviewLoading={overviewLoading}
+                overviewError={overviewError}
+                days={overviewDays}
+                onDaysChange={setOverviewDays}
+                activeOnly={overviewActiveOnly}
+                onActiveOnlyChange={setOverviewActiveOnly}
+              />
             )}
 
             {tab === 'students' && (
-              <div className="flex gap-6 flex-col lg:flex-row">
-                <div className="flex-1 min-w-0 rounded-2xl bg-white border border-mentis-yellow/50 shadow-md overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                      <thead>
-                        <tr className="border-b border-mentis-yellow/40 bg-mentis-navy/5">
-                          <th className="px-4 md:px-6 py-3 text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70">Estudiante</th>
-                          <th className="px-4 md:px-6 py-3 text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70">Email</th>
-                          <th className="px-4 md:px-6 py-3 text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70 text-right">Puntos PR</th>
-                          <th className="px-4 md:px-6 py-3 text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70 text-right">Último chat</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-mentis-yellow/20">
-                        {data.students.length === 0 ? (
-                          <tr>
-                            <td colSpan={4} className="px-4 md:px-6 py-8 text-center text-mentis-navy/60 text-sm">
-                              Aún no hay estudiantes. Los alumnos se unen con el código de la organización.
-                            </td>
-                          </tr>
-                        ) : (
-                          data.students.map((s) => (
-                            <tr
-                              key={s.id}
-                              onClick={() => setSelectedStudentId(s.id)}
-                              className="hover:bg-mentis-yellow/10 cursor-pointer transition-colors"
-                            >
-                              <td className="px-4 md:px-6 py-4 font-medium text-mentis-navy">{s.name}</td>
-                              <td className="px-4 md:px-6 py-4 text-sm text-mentis-navy/80">{s.email ?? '—'}</td>
-                              <td className="px-4 md:px-6 py-4 text-right font-bold text-mentis-navy">{s.prPoints ?? 0}</td>
-                              <td className="px-4 md:px-6 py-4 text-right text-xs text-mentis-navy/70">
-                                {s.lastChatAt
-                                  ? new Date(s.lastChatAt).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-                                  : '—'}
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-                {selectedStudentId && (
-                  <div className="lg:w-[420px] shrink-0 rounded-2xl bg-white border-2 border-mentis-yellow/60 shadow-lg overflow-hidden flex flex-col max-h-[80vh]">
-                    <div className="px-4 md:px-6 py-3 border-b border-mentis-yellow/40 flex items-center justify-between bg-mentis-navy/5">
-                      <h3 className="text-sm font-bold text-mentis-navy uppercase tracking-wider">Detalle del estudiante</h3>
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <label htmlFor="students-search" className="sr-only">
+                    Buscar estudiantes por nombre o email
+                  </label>
+                  <span className="relative flex-1 max-w-md">
+                    <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4 text-mentis-navy/50">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <circle cx="11" cy="11" r="8" />
+                        <path d="m21 21-4.35-4.35" />
+                      </svg>
+                    </span>
+                    <input
+                      id="students-search"
+                      type="search"
+                      value={studentsSearch}
+                      onChange={(e) => setStudentsSearch(e.target.value)}
+                      placeholder="Buscar por nombre o email…"
+                      className={`w-full rounded-xl border border-mentis-yellow/50 bg-white py-3 pl-11 text-sm text-mentis-navy placeholder:text-mentis-navy/40 focus:border-mentis-yellow focus:outline-none focus:ring-2 focus:ring-mentis-yellow/30 ${studentsSearch ? 'pr-11' : 'pr-4'}`}
+                    />
+                    {studentsSearch && (
                       <button
                         type="button"
-                        onClick={() => setSelectedStudentId(null)}
-                        className="text-mentis-navy/60 hover:text-mentis-navy text-xl leading-none"
-                        aria-label="Cerrar"
+                        onClick={() => setStudentsSearch('')}
+                        className="absolute inset-y-0 right-0 flex items-center pr-4 text-mentis-navy/50 hover:text-mentis-navy"
+                        aria-label="Borrar búsqueda"
                       >
-                        ×
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M18 6 6 18M6 6l12 12" />
+                        </svg>
                       </button>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-mentis">
-                      {detailLoading ? (
-                        <p className="text-mentis-navy/60 text-sm">Cargando…</p>
-                      ) : detailData ? (
-                        <>
-                          <div>
-                            <p className="text-lg font-bold text-mentis-navy">{detailData.student.name}</p>
-                            <p className="text-xs text-mentis-navy/60">{detailData.student.email ?? '—'}</p>
-                            <p className="text-[10px] text-mentis-navy/50 mt-1">
-                              Alta: {new Date(detailData.student.createdAt).toLocaleDateString('es-ES')}
-                            </p>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="rounded-xl bg-mentis-yellow/20 border border-mentis-yellow/50 p-3">
-                              <p className="text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70">Puntos PR</p>
-                              <p className="text-xl font-bold text-mentis-navy">{detailData.progress.prPoints}</p>
-                            </div>
-                            <div className="rounded-xl bg-mentis-navy/5 border border-mentis-yellow/40 p-3">
-                              <p className="text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70">Racha</p>
-                              <p className="text-xl font-bold text-mentis-navy">{detailData.progress.streak}</p>
-                            </div>
-                            <div className="rounded-xl bg-mentis-navy/5 border border-mentis-yellow/40 p-3">
-                              <p className="text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70">Pistas usadas</p>
-                              <p className="text-xl font-bold text-mentis-navy">{detailData.progress.hintsUsed}</p>
-                            </div>
-                            <div className="rounded-xl bg-mentis-navy/5 border border-mentis-yellow/40 p-3 col-span-2">
-                              <p className="text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70">Último chat</p>
-                              <p className="text-sm font-medium text-mentis-navy">
-                                {detailData.progress.lastChatAt
-                                  ? new Date(detailData.progress.lastChatAt).toLocaleString('es-ES')
-                                  : '—'}
-                              </p>
-                            </div>
-                          </div>
-                          <div>
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-mentis-navy/70 mb-2">Resúmenes de aprendizaje ({detailData.summaries.length})</p>
-                            {detailData.summaries.length === 0 ? (
-                              <p className="text-xs text-mentis-navy/50">Aún no ha generado resúmenes.</p>
-                            ) : (
-                              <div className="space-y-3">
-                                {detailData.summaries.map((sum) => (
-                                  <div key={sum.id} className="rounded-xl bg-mentis-navy/5 border border-mentis-yellow/30 p-3">
-                                    <p className="text-[10px] text-mentis-navy/50 mb-1">
-                                      {new Date(sum.createdAt).toLocaleString('es-ES')}
-                                    </p>
-                                    <p className="text-xs text-mentis-navy/90 whitespace-pre-wrap line-clamp-4">{sum.content}</p>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </>
+                    )}
+                  </span>
+                  {studentsSearch && (
+                    <span className="text-sm text-mentis-navy/60 whitespace-nowrap">
+                      {filteredStudents.length} de {data.students.length} estudiantes
+                    </span>
+                  )}
+                </div>
+                <div className="rounded-2xl bg-white border border-mentis-yellow/50 shadow-md overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left min-w-[800px]">
+                    <thead>
+                      <tr className="border-b border-mentis-yellow/40 bg-mentis-navy/5">
+                        <th className="px-4 md:px-5 py-4 text-xs font-semibold uppercase tracking-wider text-mentis-navy/70">
+                          <button type="button" onClick={() => handleStudentsSort('name')} className="flex items-center gap-1.5 hover:text-mentis-navy group">
+                            Estudiante
+                            <span className="inline-flex shrink-0 opacity-60 group-hover:opacity-100" aria-hidden>
+                              {studentsSortKey === 'name' ? (
+                                studentsSortDir === 'desc' ? (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M18 15l-6-6-6 6" /></svg>
+                                ) : (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M6 9l6 6 6-6" /></svg>
+                                )
+                              ) : (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-navy/50"><path d="M7 15l5 5 5-5M7 9l5-5 5 5" /></svg>
+                              )}
+                            </span>
+                          </button>
+                        </th>
+                        <th className="px-4 md:px-5 py-4 text-xs font-semibold uppercase tracking-wider text-mentis-navy/70 hidden lg:table-cell">Email</th>
+                        <th className="px-4 md:px-5 py-4 text-xs font-semibold uppercase tracking-wider text-mentis-navy/70">
+                          <button type="button" onClick={() => handleStudentsSort('nivel')} className="flex items-center gap-1.5 hover:text-mentis-navy group">
+                            Nivel
+                            <span className="inline-flex shrink-0 opacity-60 group-hover:opacity-100" aria-hidden>
+                              {studentsSortKey === 'nivel' ? (
+                                studentsSortDir === 'desc' ? (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M18 15l-6-6-6 6" /></svg>
+                                ) : (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M6 9l6 6 6-6" /></svg>
+                                )
+                              ) : (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-navy/50"><path d="M7 15l5 5 5-5M7 9l5-5 5 5" /></svg>
+                              )}
+                            </span>
+                          </button>
+                        </th>
+                        <th className="px-4 md:px-5 py-4 text-xs font-semibold uppercase tracking-wider text-mentis-navy/70">
+                          <button type="button" onClick={() => handleStudentsSort('dependencia')} className="flex items-center gap-1.5 hover:text-mentis-navy group">
+                            Dependencia
+                            <span className="inline-flex shrink-0 opacity-60 group-hover:opacity-100" aria-hidden>
+                              {studentsSortKey === 'dependencia' ? (
+                                studentsSortDir === 'desc' ? (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M18 15l-6-6-6 6" /></svg>
+                                ) : (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M6 9l6 6 6-6" /></svg>
+                                )
+                              ) : (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-navy/50"><path d="M7 15l5 5 5-5M7 9l5-5 5 5" /></svg>
+                              )}
+                            </span>
+                          </button>
+                        </th>
+                        <th className="px-4 md:px-5 py-4 text-xs font-semibold uppercase tracking-wider text-mentis-navy/70 text-right">
+                          <button type="button" onClick={() => handleStudentsSort('puntos')} className="inline-flex items-center gap-1.5 ml-auto hover:text-mentis-navy group">
+                            Puntos
+                            <span className="inline-flex shrink-0 opacity-60 group-hover:opacity-100" aria-hidden>
+                              {studentsSortKey === 'puntos' ? (
+                                studentsSortDir === 'desc' ? (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M18 15l-6-6-6 6" /></svg>
+                                ) : (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M6 9l6 6 6-6" /></svg>
+                                )
+                              ) : (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-navy/50"><path d="M7 15l5 5 5-5M7 9l5-5 5 5" /></svg>
+                              )}
+                            </span>
+                          </button>
+                        </th>
+                        <th className="px-4 md:px-5 py-4 text-xs font-semibold uppercase tracking-wider text-mentis-navy/70 text-right">
+                          <button type="button" onClick={() => handleStudentsSort('racha')} className="inline-flex items-center gap-1.5 ml-auto hover:text-mentis-navy group">
+                            Racha
+                            <span className="inline-flex shrink-0 opacity-60 group-hover:opacity-100" aria-hidden>
+                              {studentsSortKey === 'racha' ? (
+                                studentsSortDir === 'desc' ? (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M18 15l-6-6-6 6" /></svg>
+                                ) : (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M6 9l6 6 6-6" /></svg>
+                                )
+                              ) : (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-navy/50"><path d="M7 15l5 5 5-5M7 9l5-5 5 5" /></svg>
+                              )}
+                            </span>
+                          </button>
+                        </th>
+                        <th className="px-4 md:px-5 py-4 text-xs font-semibold uppercase tracking-wider text-mentis-navy/70 text-right">
+                          <button type="button" onClick={() => handleStudentsSort('pistas')} className="inline-flex items-center gap-1.5 ml-auto hover:text-mentis-navy group">
+                            Pistas
+                            <span className="inline-flex shrink-0 opacity-60 group-hover:opacity-100" aria-hidden>
+                              {studentsSortKey === 'pistas' ? (
+                                studentsSortDir === 'desc' ? (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M18 15l-6-6-6 6" /></svg>
+                                ) : (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M6 9l6 6 6-6" /></svg>
+                                )
+                              ) : (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-navy/50"><path d="M7 15l5 5 5-5M7 9l5-5 5 5" /></svg>
+                              )}
+                            </span>
+                          </button>
+                        </th>
+                        <th className="px-4 md:px-5 py-4 text-xs font-semibold uppercase tracking-wider text-mentis-navy/70">
+                          <button type="button" onClick={() => handleStudentsSort('alertas')} className="flex items-center gap-1.5 hover:text-mentis-navy group">
+                            Alertas
+                            <span className="inline-flex shrink-0 opacity-60 group-hover:opacity-100" aria-hidden>
+                              {studentsSortKey === 'alertas' ? (
+                                studentsSortDir === 'desc' ? (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M18 15l-6-6-6 6" /></svg>
+                                ) : (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M6 9l6 6 6-6" /></svg>
+                                )
+                              ) : (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-navy/50"><path d="M7 15l5 5 5-5M7 9l5-5 5 5" /></svg>
+                              )}
+                            </span>
+                          </button>
+                        </th>
+                        <th className="px-4 md:px-5 py-4 text-xs font-semibold uppercase tracking-wider text-mentis-navy/70 text-right">
+                          <button type="button" onClick={() => handleStudentsSort('ultimo_chat')} className="inline-flex items-center gap-1.5 ml-auto hover:text-mentis-navy group">
+                            Último chat
+                            <span className="inline-flex shrink-0 opacity-60 group-hover:opacity-100" aria-hidden>
+                              {studentsSortKey === 'ultimo_chat' ? (
+                                studentsSortDir === 'desc' ? (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M18 15l-6-6-6 6" /></svg>
+                                ) : (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-yellow"><path d="M6 9l6 6 6-6" /></svg>
+                                )
+                              ) : (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-mentis-navy/50"><path d="M7 15l5 5 5-5M7 9l5-5 5 5" /></svg>
+                              )}
+                            </span>
+                          </button>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-mentis-yellow/20">
+                      {data.students.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="px-4 md:px-6 py-10 text-center text-mentis-navy/60 text-base">
+                            Aún no hay estudiantes. Los alumnos se unen con el código de la organización.
+                          </td>
+                        </tr>
+                      ) : filteredStudents.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="px-4 md:px-6 py-10 text-center text-mentis-navy/60 text-base">
+                            No hay estudiantes que coincidan con &quot;{studentsSearch.trim()}&quot;. Prueba con otro nombre o email.
+                          </td>
+                        </tr>
                       ) : (
-                        <p className="text-mentis-navy/60 text-sm">No se pudo cargar el detalle.</p>
+                        filteredStudents.map((s) => (
+                          <tr
+                            key={s.id}
+                            onClick={() => router.push(`/organizer/students/${s.id}`)}
+                            className="hover:bg-mentis-yellow/10 cursor-pointer transition-colors"
+                          >
+                            <td className="px-4 md:px-5 py-4 font-medium text-mentis-navy text-base">{s.name}</td>
+                            <td className="px-4 md:px-5 py-4 text-sm text-mentis-navy/80 hidden lg:table-cell">{s.email ?? '—'}</td>
+                            <td className="px-4 md:px-5 py-4">
+                              <span className={`${NIVEL_STYLE[s?.learningLevel ?? 'sin_actividad']} text-xs`}>
+                                {NIVEL_LABEL[s?.learningLevel ?? 'sin_actividad']}
+                              </span>
+                            </td>
+                            <td className="px-4 md:px-5 py-4">
+                              <span className={`${DEPENDENCIA_STYLE[s?.segment ?? 'sin_actividad']} text-xs`}>
+                                {DEPENDENCIA_LABEL[s?.segment ?? 'sin_actividad']}
+                              </span>
+                            </td>
+                            <td className="px-4 md:px-5 py-4 text-right font-semibold text-mentis-navy tabular-nums text-base">{s.prPoints ?? 0}</td>
+                            <td className="px-4 md:px-5 py-4 text-right text-sm text-mentis-navy/80 tabular-nums">{s.streak ?? 0} d</td>
+                            <td className="px-4 md:px-5 py-4 text-right text-sm text-mentis-navy/80 tabular-nums">{s.hintsUsed ?? 0}</td>
+                            <td className="px-4 md:px-5 py-4">
+                              {(s.flags?.length ?? 0) > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {(s.flags ?? []).slice(0, 2).map((f) => (
+                                    <span key={f} className="inline-flex px-2 py-1 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200/60">
+                                      {FLAG_LABELS[f] ?? f}
+                                    </span>
+                                  ))}
+                                  {(s.flags?.length ?? 0) > 2 && (
+                                    <span className="text-xs text-mentis-navy/50">+{(s.flags?.length ?? 0) - 2}</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-mentis-navy/40 text-sm">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 md:px-5 py-4 text-right text-sm text-mentis-navy/70 whitespace-nowrap">
+                              {s.lastChatAt
+                                ? new Date(s.lastChatAt).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+                                : '—'}
+                            </td>
+                          </tr>
+                        ))
                       )}
-                    </div>
-                  </div>
-                )}
+                    </tbody>
+                  </table>
+                </div>
+                </div>
               </div>
             )}
 

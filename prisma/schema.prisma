@@ -48,6 +48,8 @@ model User {
   createdJoinCodes JoinCode[]
   learningSummaries LearningSummary[]
   studentProgress  StudentProgress?
+  teacherGuidelines StudentTeacherGuidelines?
+  learningEvents   LearningEvent[]
 
   @@index([email])
   @@index([organizationId])
@@ -137,5 +139,34 @@ model LearningSummary {
   @@index([userId])
   @@index([createdAt])
   @@map("learning_summaries")
+}
+
+model StudentTeacherGuidelines {
+  id           String   @id @default(uuid())
+  studentId    String   @unique @map("student_id")
+  teacherPrompt String? @map("teacher_prompt") @db.Text
+  privateNotes  String? @map("private_notes") @db.Text
+  createdAt    DateTime @default(now()) @map("createdAt")
+  updatedAt    DateTime @updatedAt @map("updatedAt")
+
+  student User @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@index([updatedAt])
+  @@map("student_teacher_guidelines")
+}
+
+model LearningEvent {
+  id        String   @id @default(uuid())
+  studentId String   @map("student_id")
+  type      String   @db.VarChar(50)
+  meta      Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  student User @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, createdAt(sort: Desc)])
+  @@index([type, createdAt(sort: Desc)])
+  @@map("learning_events")
 }
 

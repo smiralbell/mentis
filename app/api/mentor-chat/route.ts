@@ -89,7 +89,21 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const systemPrompt = buildMentorSystemPrompt(phase, ctx, requestingHint)
+    let teacherGuidelines: string | null = null
+    if (session.user.role === 'STUDENT' && session.user.id) {
+      try {
+        const { prisma } = await import('@/lib/prisma')
+        const g = await prisma.studentTeacherGuidelines.findUnique({
+          where: { studentId: session.user.id },
+          select: { teacherPrompt: true },
+        })
+        if (g?.teacherPrompt) teacherGuidelines = g.teacherPrompt
+      } catch (_) {
+        // ignore: table may not exist or DB error
+      }
+    }
+
+    const systemPrompt = buildMentorSystemPrompt(phase, ctx, requestingHint, teacherGuidelines)
 
     const openRouterMessages = [
       { role: 'system', content: systemPrompt },

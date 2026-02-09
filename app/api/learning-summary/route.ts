@@ -88,6 +88,17 @@ Sé conciso y claro. No inventes contenido que no esté en la conversación.`
           sourceId: body.sourceId ?? null,
         },
       })
+      try {
+        await prisma.learningEvent.create({
+          data: {
+            studentId: session.user.id,
+            type: 'summary_created',
+            meta: { sourceId: body.sourceId ?? null },
+          },
+        })
+      } catch (_) {
+        // learning_events puede no existir aún
+      }
     } catch (dbErr) {
       console.error('Learning summary save error (table may not exist yet)', dbErr)
       // No fallar la petición si la tabla no existe aún
