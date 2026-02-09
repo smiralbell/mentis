@@ -112,7 +112,7 @@ export async function GET() {
       if (hintsAvg >= HIGH_HINTS_AVG && sessionCount > 0) flags.push('dependencia_alta')
       if (
         sessionCount >= STAGNATION_SESSIONS_MIN &&
-        summariesPrev.length >= STAGNATION_SESSIONS_MIN &&
+        summariesPrev >= STAGNATION_SESSIONS_MIN &&
         prPoints < STAGNATION_POINTS_GROWTH_MAX
       )
         flags.push('estancamiento')
