@@ -431,7 +431,7 @@ function OrganizerOverviewCharts({
                     <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 12, fill: CHART_COLORS.primary }} />
                     <Tooltip
                       contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 40px rgba(30,58,95,0.12)' }}
-                      formatter={(value: number) => [value, 'Puntos PR']}
+                      formatter={(value: number | undefined) => [value ?? 0, 'Puntos PR']}
                       labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName ?? ''}
                     />
                     <Bar dataKey="puntos" fill={CHART_COLORS.yellow} radius={[0, 8, 8, 0]} name="Puntos" />
@@ -472,7 +472,7 @@ function OrganizerOverviewCharts({
                     </Pie>
                     <Tooltip
                       contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 40px rgba(30,58,95,0.12)' }}
-                      formatter={(value: number) => [value, 'estudiantes']}
+                      formatter={(value: number | undefined) => [value ?? 0, 'estudiantes']}
                     />
                     <Legend
                       layout="horizontal"
@@ -636,7 +636,7 @@ function OrganizerOverviewCharts({
                   <Tooltip
                     contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 40px rgba(30,58,95,0.12)' }}
                     labelFormatter={(_, payload) => payload?.[0]?.payload?.date ? new Date(payload[0].payload.date).toLocaleDateString('es-ES') : ''}
-                    formatter={(value: number) => [value, 'resúmenes']}
+                    formatter={(value: number | undefined) => [value ?? 0, 'resúmenes']}
                   />
                   <Area type="monotone" dataKey="resúmenes" stroke={CHART_COLORS.yellowDark} strokeWidth={2.5} fill="url(#areaGradient)" name="Resúmenes" />
                 </AreaChart>
