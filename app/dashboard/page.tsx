@@ -604,7 +604,7 @@ function OrganizerOverviewCharts({
                         <Cell key={entry.label} fill={entry.color} />
                       ))}
                     </Pie>
-                    <Tooltip contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 40px rgba(30,58,95,0.12)' }} formatter={(v: number) => [v, 'alumnos']} />
+                    <Tooltip contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 40px rgba(30,58,95,0.12)' }} formatter={(v: number | undefined) => [v ?? 0, 'alumnos']} />
                     <Legend layout="horizontal" align="center" verticalAlign="bottom" iconType="circle" iconSize={8} wrapperStyle={{ paddingTop: 12 }} formatter={(v) => <span className="text-xs text-mentis-navy/80">{v}</span>} />
                   </PieChart>
                 </ResponsiveContainer>
