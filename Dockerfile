@@ -1,9 +1,11 @@
 ############################################
 # MENTIS - Production Dockerfile for EasyPanel
 ############################################
+# Usamos Debian (slim) en lugar de Alpine para que Prisma tenga libssl compatible.
+# En Alpine faltaba libssl.so.1.1 y el motor de Prisma no arrancaba (login fallaba).
 
 # 1) Build stage
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 
 WORKDIR /app
 
@@ -22,15 +24,18 @@ RUN npm run build
 
 
 # 2) Runtime stage
-FROM node:20-alpine AS runner
+FROM node:20-slim AS runner
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
 
+# Dependencias para Prisma en runtime (OpenSSL + libc)
+RUN apt-get update -y && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user for security
-RUN addgroup -S mentis && adduser -S mentis -G mentis
+RUN groupadd -r mentis && useradd -r -g mentis mentis
 
 # Copy standalone build output
 COPY --from=builder /app/.next/standalone ./
