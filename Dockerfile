@@ -1,17 +1,23 @@
 ############################################
 # MENTIS - Production Dockerfile for EasyPanel
 ############################################
-# Alpine + Prisma con binaryTarget linux-musl-openssl-3.0.x para que el motor cargue (libssl.so.3).
+# Alpine + Prisma binaryTarget linux-musl-openssl-3.0.x. OpenSSL en runner para el engine.
 
 # 1) Build stage
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Evitar OOM en next build
+ENV NODE_OPTIONS="--max-old-space-size=2048"
+
 COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+
+# Prisma generate no conecta al DB; solo necesita URL válida
+ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
 
 RUN npx prisma generate
 
@@ -26,7 +32,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# Prisma en Alpine necesita OpenSSL (libssl.so.3); sin esto falla el login
+# Prisma en Alpine necesita libssl.so.3
 RUN apk add --no-cache openssl
 
 RUN addgroup -S mentis && adduser -S mentis -G mentis
